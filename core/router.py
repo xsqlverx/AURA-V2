@@ -42,6 +42,7 @@ _TOOL_KEYWORDS = {
     "cpu", "ram", "memory", "disk", "battery", "stats", "usage",
     "clipboard", "copy", "paste", "type", "press", "hotkey",
     "note", "notes", "write down", "remind",
+    "remember", "memory", "forget", "recall",
     "whatsapp", "message", "send",
     "screenshot", "screen",
 }

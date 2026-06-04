@@ -121,8 +121,6 @@ class MemoryStore:
             return f"Index {index} out of range."
 
     def get_system_prompt_block(self) -> str:
-        if self._system_prompt_snapshot is not None:
-            return self._system_prompt_snapshot
         return self._build_snapshot()
 
     def refresh_snapshot(self) -> None:
@@ -152,6 +150,7 @@ class MemoryStore:
         path = self._memory_dir / name
         entries = self._get_entries(category)
         self._save_file_with_drift_detection(path, entries)
+        self._refresh_snapshot()
 
     def _save_file_with_drift_detection(self, path: Path, entries: list[str]) -> None:
         name = path.name

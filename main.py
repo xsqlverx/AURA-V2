@@ -27,11 +27,11 @@ logger = logging.getLogger(__name__)
 
 
 def print_banner():
-    banner = """
-  ╔══════════════════════════════════════╗
-  ║           A U R A  v2               ║
-  ║     local AI assistant — online     ║
-  ╚══════════════════════════════════════╝"""
+    banner = r"""
+  +------------------------------------+
+  |           A U R A  v2              |
+  |     local AI assistant - online    |
+  +------------------------------------+"""
     print(banner)
 
 

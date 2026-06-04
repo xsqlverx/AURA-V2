@@ -137,6 +137,9 @@ venv.bak/
 .env.*.local
 # .env.example is intentionally NOT ignored
 
+# Contact data (contains personal phone numbers)
+contacts.json
+
 # Spyder project settings
 .spyderproject
 .spyproject
