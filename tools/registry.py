@@ -41,7 +41,8 @@ TOOLS = [
     {"type": "function", "function": {"name": "execute_hotkey", "description": "Execute a keyboard shortcut like ctrl+c.", "parameters": {"type": "object", "properties": {"keys": {"type": "string", "description": "Keys joined by +, e.g. 'ctrl+c'"}}, "required": ["keys"]}}},
     # ── Communication ──────────────────────────────────────────────────────────
     {"type": "function", "function": {"name": "send_whatsapp", "description": "Send a WhatsApp message to a saved contact.", "parameters": {"type": "object", "properties": {"contact": {"type": "string", "description": "Contact name (e.g. mom, dad, etc.) — check your contacts list in the system prompt for valid names."}, "message": {"type": "string"}}, "required": ["contact", "message"]}}},
-    
+    # ── Memory ─────────────────────────────────────────────────────────────────
+    {"type": "function", "function": {"name": "memory", "description": "Manage what Aura knows about the user or about herself. Use 'list' to see current memories, 'add' to save something new, 'replace' to update an existing memory by providing a unique substring as identifier, and 'remove' to delete a memory by providing a unique substring. Category 'user' stores facts about the user; category 'self' stores Aura's own notes.", "parameters": {"type": "object", "properties": {"action": {"type": "string", "enum": ["add", "replace", "remove", "list"]}, "category": {"type": "string", "enum": ["user", "self"], "description": "'user' for facts about the user, 'self' for Aura's own notes."}, "text": {"type": "string", "description": "The memory text (required for add/replace)."}, "identifier": {"type": "string", "description": "A unique substring to find the entry (required for replace/remove)."}}, "required": ["action"]}}},
 ]
 
 TOOL_NAMES = {t["function"]["name"] for t in TOOLS}

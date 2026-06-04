@@ -5,15 +5,25 @@ import logging
 from pathlib import Path
 from typing import AsyncIterator
 
+from core.config import MEMORY_NUDGE_INTERVAL
 from core.router import get_client_and_model, needs_tools
 from memory import chroma_store
 from memory.context import get_context_block
+from memory.memory_tool import handle_memory_tool
+from memory.store import get_store
 from tools.registry import TOOLS, TOOL_NAMES
 from tools import system, web
 
 logger = logging.getLogger(__name__)
 
 MAX_TOOL_ROUNDS = 3
+_turns_since_memory = 0
+
+
+def _scrub(text: str) -> str:
+    for tag in ("<memory-context>", "</memory-context>"):
+        text = text.replace(tag, "").replace(tag.upper(), "")
+    return text
 
 # ── System Prompt ─────────────────────────────────────────────────────────────
 
@@ -51,6 +61,19 @@ async def _build_system_prompt() -> str:
             )
         except Exception:
             pass
+
+    try:
+        curated = get_store().get_system_prompt_block()
+        if curated:
+            parts.append(f"\n{curated}")
+    except Exception:
+        pass
+
+    global _turns_since_memory
+    if _turns_since_memory >= MEMORY_NUDGE_INTERVAL:
+        parts.append(
+            "\n(Note: Consider using the `memory` tool if you've learned something new about the user.)"
+        )
 
     return "\n".join(parts)
 
@@ -97,6 +120,15 @@ async def _run_tool(name: str, args: dict) -> str:
                 from tools.comms import send_whatsapp
                 contact = args.get("contact") or args.get("phone_number", "")
                 result = send_whatsapp(contact, args.get("message", ""))
+            case "memory":
+                global _turns_since_memory
+                _turns_since_memory = 0
+                result = handle_memory_tool(
+                    action=args.get("action", ""),
+                    category=args.get("category", "user"),
+                    text=args.get("text", ""),
+                    identifier=args.get("identifier", ""),
+                )
             case _:
                 result = {"error": f"Unhandled tool: {name}"}
 
@@ -113,6 +145,8 @@ async def run(
     history: list[dict],
     mode: str = "deep",
 ) -> AsyncIterator[str]:
+    global _turns_since_memory
+    _turns_since_memory += 1
     system_prompt = await _build_system_prompt()
     messages = [
         {"role": "system", "content": system_prompt},
@@ -139,6 +173,7 @@ async def run(
         async for chunk in stream:
             delta = chunk.choices[0].delta.content or ""
             if delta:
+                delta = _scrub(delta)
                 full_response.append(delta)
                 yield delta
         chroma_store.save(f"User: {message}")
@@ -197,7 +232,7 @@ async def run(
         # ── No tool calls — model gave a direct answer ────────────────────────
         # This shouldn't happen often but handle it gracefully
         if msg.content:
-            yield msg.content
+            yield _scrub(msg.content)
             chroma_store.save(f"User: {message}")
             chroma_store.save(f"Aura: {msg.content}")
             return
@@ -217,6 +252,7 @@ async def run(
     async for chunk in stream:
         delta = chunk.choices[0].delta.content or ""
         if delta:
+            delta = _scrub(delta)
             full_response.append(delta)
             yield delta
 

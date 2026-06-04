@@ -8,7 +8,25 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
+from core.config import MEMORY_DIR, MEMORY_CHAR_LIMIT, USER_CHAR_LIMIT
+
 logger = logging.getLogger(__name__)
+
+_store: "MemoryStore | None" = None
+
+
+def init_store() -> "MemoryStore":
+    global _store
+    if _store is None:
+        _store = MemoryStore(MEMORY_DIR, MEMORY_CHAR_LIMIT, USER_CHAR_LIMIT)
+    _store.load_from_disk()
+    return _store
+
+
+def get_store() -> "MemoryStore":
+    if _store is None:
+        raise RuntimeError("MemoryStore not initialized. Call init_store() first.")
+    return _store
 
 
 class MemoryStore:
@@ -49,7 +67,7 @@ class MemoryStore:
             while total > limit and len(entries) > 1:
                 removed = entries.pop(0)
                 total -= len(removed)
-                logger.info("Evicted oldest entry (%d chars) from %s", len(removed), category)
+                logger.info("Evicted %d-char entry from %s: %.80s", len(removed), category, removed)
             if total > limit:
                 return "That memory entry exceeds the character limit even by itself."
             self._save_category(category)
@@ -84,6 +102,24 @@ class MemoryStore:
             return "No memories saved."
         return "\n".join(f"{i+1}. {e}" for i, e in enumerate(entries))
 
+    def replace_by_index(self, category: str, index: int, new_text: str) -> str:
+        with self._lock:
+            entries = self._get_entries(category)
+            if 0 <= index < len(entries):
+                entries[index] = new_text.strip()
+                self._save_category(category)
+                return "Memory updated."
+            return f"Index {index} out of range."
+
+    def remove_by_index(self, category: str, index: int) -> str:
+        with self._lock:
+            entries = self._get_entries(category)
+            if 0 <= index < len(entries):
+                entries.pop(index)
+                self._save_category(category)
+                return "Memory removed."
+            return f"Index {index} out of range."
+
     def get_system_prompt_block(self) -> str:
         if self._system_prompt_snapshot is not None:
             return self._system_prompt_snapshot
@@ -101,6 +137,12 @@ class MemoryStore:
             raw = path.read_text(encoding="utf-8")
         except Exception as e:
             logger.warning("Failed to read %s: %s", path, e)
+            backup = path.with_name(f"{path.name}.corrupted.{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+            try:
+                path.rename(backup)
+                logger.info("Corrupted %s backed up to %s — starting fresh", path.name, backup.name)
+            except Exception:
+                logger.warning("Could not back up corrupted %s", path.name)
             return []
         parts = [p.strip() for p in raw.split("\u00a7")]
         return [p for p in parts if p]
@@ -115,13 +157,21 @@ class MemoryStore:
         name = path.name
         current_hash = self._compute_hash(path)
         stored_hash = self._disk_hashes.get(name)
-        if stored_hash is not None and current_hash != stored_hash:
+
+        should_backup = False
+        if stored_hash is None and path.exists():
+            should_backup = True
+        elif stored_hash is not None and current_hash != stored_hash:
+            should_backup = True
+
+        if should_backup:
             backup = path.with_name(f"{name}.bak.{datetime.now().strftime('%Y%m%d_%H%M%S')}")
             try:
                 path.rename(backup)
-                logger.info("Drift detected in %s — backed up to %s", name, backup.name)
+                logger.info("Backed up %s to %s", name, backup.name)
             except Exception as e:
-                logger.warning("Drift detected but backup failed for %s: %s", name, e)
+                logger.warning("Backup failed for %s: %s", name, e)
+
         self._atomic_write(path, entries)
         h = self._compute_hash(path)
         if h:

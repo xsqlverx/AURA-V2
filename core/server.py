@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from core.config import SERVER_HOST, SERVER_PORT, UI_SOCKET_PORT
 from core import agent
 from memory import chroma_store
+from memory.store import init_store, get_store
 from tools import media
 
 logger = logging.getLogger(__name__)
@@ -109,6 +110,12 @@ async def lifespan(app: FastAPI):
     if not memory_ok:
         logger.warning("Memory unavailable — Aura will run without persistent memory.")
 
+    try:
+        init_store()
+        logger.info("Curated memory initialized.")
+    except Exception as e:
+        logger.warning("Curated memory init failed: %s", e)
+
     _start_socket_bridge()
 
     # Start window tracker daemon for briefing activity data
@@ -144,6 +151,13 @@ class MemoryCreate(BaseModel):
     metadata: Optional[dict] = None
 
 class MemoryUpdate(BaseModel):
+    text: str
+
+class CuratedMemoryCreate(BaseModel):
+    category: str = "user"
+    text: str
+
+class CuratedMemoryUpdate(BaseModel):
     text: str
 
 class MediaAction(BaseModel):
@@ -230,6 +244,7 @@ async def chat(req: ChatRequest):
                 activity = data.get("activity", [])
                 memories = data.get("memories", [])
                 notes = data.get("notes", [])
+                curated = data.get("curated", {})
 
                 stats_block = (
                     f"CPU: {stats.get('cpu_percent', 'N/A')}%, "
@@ -262,6 +277,15 @@ async def chat(req: ChatRequest):
                     f"- {n['title']}: {n['content'][:200]}" for n in notes[:3]
                 ) if notes else "No saved notes."
 
+                curated_user = "\n".join(f"- {e}" for e in curated.get("user", [])[:5])
+                curated_self = "\n".join(f"- {e}" for e in curated.get("self", [])[:5])
+                curated_blocks = []
+                if curated_user:
+                    curated_blocks.append(f"What I know about them:\n{curated_user}")
+                if curated_self:
+                    curated_blocks.append(f"What I know about myself:\n{curated_self}")
+                curated_block = "\n\n".join(curated_blocks) if curated_blocks else ""
+
                 prompt = (
                     f"You are Aura, Kenaz's AI assistant. Give a warm, conversational daily briefing "
                     f"in first person. Speak naturally. Keep it to 2-3 paragraphs. "
@@ -273,6 +297,8 @@ async def chat(req: ChatRequest):
                     f"## Recent Memories\n{memories_block}\n\n"
                     f"## Notes\n{notes_block}"
                 )
+                if curated_block:
+                    prompt += f"\n\n## What I remember\n{curated_block}"
 
                 response = await openrouter_client.chat.completions.create(
                     model=MODEL_FAST,
@@ -334,6 +360,40 @@ async def update_memory(id: str, req: MemoryUpdate):
 async def delete_memory(id: str):
     ok = chroma_store.delete_entry(id)
     return {"success": ok}
+
+
+# ── Curated Memory CRUD ───────────────────────────────────────────────────────
+
+@app.get("/curated-memory")
+async def get_curated_memory():
+    store = get_store()
+    entries = []
+    for i, t in enumerate(store.memory_entries):
+        entries.append({"id": i, "category": "self", "text": t})
+    for i, t in enumerate(store.user_entries):
+        entries.append({"id": i, "category": "user", "text": t})
+    return {"entries": entries}
+
+
+@app.post("/curated-memory")
+async def create_curated_memory(req: CuratedMemoryCreate):
+    store = get_store()
+    result = store.add_entry(req.category, req.text)
+    return {"result": result}
+
+
+@app.put("/curated-memory/{category}/{idx}")
+async def update_curated_memory(category: str, idx: int, req: CuratedMemoryUpdate):
+    store = get_store()
+    result = store.replace_by_index(category, idx, req.text)
+    return {"result": result}
+
+
+@app.delete("/curated-memory/{category}/{idx}")
+async def delete_curated_memory(category: str, idx: int):
+    store = get_store()
+    result = store.remove_by_index(category, idx)
+    return {"result": result}
 
 
 # ── Media ─────────────────────────────────────────────────────────────────────
@@ -563,6 +623,7 @@ async def _gather_briefing_data() -> dict:
     from tools.tracker import get_recent_activity
     from memory.context import get_context_block
     from memory import chroma_store
+    from memory.store import get_store
 
     async def _get_stats():
         loop = asyncio.get_running_loop()
@@ -580,15 +641,23 @@ async def _gather_briefing_data() -> dict:
     async def _get_notes():
         return _load_notes()
 
+    async def _get_curated():
+        store = get_store()
+        return {
+            "user": list(store.user_entries),
+            "self": list(store.memory_entries),
+        }
+
     news_task = asyncio.create_task(get_news_headlines(5))
     stats_task = asyncio.create_task(_get_stats())
     activity_task = asyncio.create_task(_get_activity())
     weather_task = asyncio.create_task(get_context_block())
     memories_task = asyncio.create_task(_get_memories())
     notes_task = asyncio.create_task(_get_notes())
+    curated_task = asyncio.create_task(_get_curated())
 
-    news, stats, activity, weather, memories, notes = await asyncio.gather(
-        news_task, stats_task, activity_task, weather_task, memories_task, notes_task,
+    news, stats, activity, weather, memories, notes, curated = await asyncio.gather(
+        news_task, stats_task, activity_task, weather_task, memories_task, notes_task, curated_task,
     )
 
     return {
@@ -598,6 +667,7 @@ async def _gather_briefing_data() -> dict:
         "activity": activity,
         "memories": memories,
         "notes": notes,
+        "curated": curated,
     }
 
 
@@ -619,6 +689,7 @@ async def briefing():
     activity = data.get("activity", [])
     memories = data.get("memories", [])
     notes = data.get("notes", [])
+    curated = data.get("curated", {})
 
     stats_block = (
         f"CPU: {stats.get('cpu_percent', 'N/A')}%, "
@@ -651,6 +722,15 @@ async def briefing():
         f"- {n['title']}: {n['content'][:200]}" for n in notes[:3]
     ) if notes else "No saved notes."
 
+    curated_user = "\n".join(f"- {e}" for e in curated.get("user", [])[:5])
+    curated_self = "\n".join(f"- {e}" for e in curated.get("self", [])[:5])
+    curated_blocks = []
+    if curated_user:
+        curated_blocks.append(f"What I know about them:\n{curated_user}")
+    if curated_self:
+        curated_blocks.append(f"What I know about myself:\n{curated_self}")
+    curated_block = "\n\n".join(curated_blocks) if curated_blocks else ""
+
     prompt = (
         f"You are Aura, Kenaz's AI assistant. Give a warm, conversational daily briefing "
         f"in first person. Speak naturally — like you're telling him. Keep it to 2-3 paragraphs. "
@@ -662,6 +742,8 @@ async def briefing():
         f"## Recent Memories\n{memories_block}\n\n"
         f"## Notes\n{notes_block}"
     )
+    if curated_block:
+        prompt += f"\n\n## What I remember\n{curated_block}"
 
     async def generate():
         try:
