@@ -1,0 +1,20 @@
+# Aura v2 dependencies — pip install -r requirements.txt
+python-dotenv
+groq
+cerebras-cloud-sdk
+fastapi
+uvicorn
+httpx
+psutil
+pycaw
+comtypes
+PySide6
+sounddevice
+soundfile
+faster-whisper
+pvporcupine
+pvrecorder
+# Pinned for compatibility and stability
+chromadb==0.4.24
+numpy==1.26.4
+sentence-transformers
