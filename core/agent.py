@@ -184,7 +184,7 @@ async def run(
     tool_rounds = 0
 
     while tool_rounds < MAX_TOOL_ROUNDS:
-        # Use Cerebras for tool calls, Groq fallback on 429
+        # Use Groq for tool calls, OpenRouter fallback on 429
         try:
             client, model = get_client_and_model("tools")
             response = await client.chat.completions.create(
@@ -197,8 +197,10 @@ async def run(
             )
         except Exception as e:
             if "429" in str(e) or "too_many_requests" in str(e):
-                logger.warning("Cerebras rate limited, falling back to Groq.")
-                client, model = get_client_and_model("deep")
+                logger.warning("Groq rate limited, falling back to OpenRouter.")
+                from core.router import openrouter_client
+                from core.config import MODEL_FAST
+                client, model = openrouter_client, MODEL_FAST
                 response = await client.chat.completions.create(
                     model=model,
                     messages=messages,

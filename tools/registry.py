@@ -18,7 +18,7 @@ TOOLS = [
     {"type": "function", "function": {"name": "list_directory", "description": "List files and folders in a directory.", "parameters": {"type": "object", "properties": {"dir_path": {"type": "string"}}, "required": []}}},
     # ── Web ────────────────────────────────────────────────────────────────────
     {"type": "function", "function": {"name": "web_search", "description": "Search the web for current info, news, facts.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
-    {"type": "function", "function": {"name": "open_website", "description": "Open a URL in the default browser.", "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}}},
+    {"type": "function", "function": {"name": "open_website", "description": "Open a URL or website in the default browser. If the user says 'open X' or 'go to Y', construct the full URL. E.g. 'open youtube' → 'https://youtube.com', 'open youtube recipes' → 'https://www.youtube.com/results?search_query=recipes', 'open google' → 'https://google.com'. Always include the protocol prefix.", "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}}},
     # ── System ─────────────────────────────────────────────────────────────────
     {"type": "function", "function": {"name": "get_system_stats", "description": "Get CPU, RAM, and disk usage.", "parameters": {"type": "object", "properties": {}, "required": []}}},
     {"type": "function", "function": {"name": "shutdown", "description": "Shut down the PC after a delay.", "parameters": {"type": "object", "properties": {"delay_seconds": {"type": "integer", "default": 20}}, "required": []}}},

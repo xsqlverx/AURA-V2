@@ -9,13 +9,15 @@ load_dotenv(Path(__file__).parent.parent / ".env.local")
 
 # ── API Keys ─────────────────────────────────────────────────────────────────
 MISTRAL_API_KEY    = os.getenv("MISTRAL_API_KEY")      # Mistral — deep/research
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")   # OpenRouter — fast/tools
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")   # OpenRouter — fast/casual
+GROQ_API_KEY       = os.getenv("GROQ_API_KEY")         # Groq — free tool calling
 DISCORD_BOT_TOKEN  = os.getenv("DISCORD_BOT_TOKEN")
 TAVILY_API_KEY     = os.getenv("TAVILY_API_KEY")
 
 _MISSING = [k for k, v in {
     "MISTRAL_API_KEY":    MISTRAL_API_KEY,
     "OPENROUTER_API_KEY": OPENROUTER_API_KEY,
+    "GROQ_API_KEY":       GROQ_API_KEY,
 }.items() if not v]
 if _MISSING:
     sys.exit(f"[config] Missing required environment variables: {', '.join(_MISSING)}")
@@ -23,7 +25,7 @@ if _MISSING:
 # ── LLM Models ───────────────────────────────────────────────────────────────
 MODEL_DEEP  = "mistral-small-latest"                   # Mistral — free tier, smart
 MODEL_FAST  = "meta-llama/llama-3.1-8b-instruct"      # OpenRouter — fast/casual
-MODEL_TOOLS = "meta-llama/llama-3.1-8b-instruct"      # OpenRouter — tool calls
+MODEL_TOOLS = "llama-3.1-8b-instant"                   # Groq — free, great at function calling
 
 # ── Server ───────────────────────────────────────────────────────────────────
 SERVER_HOST = "127.0.0.1"

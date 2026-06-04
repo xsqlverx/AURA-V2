@@ -1,5 +1,5 @@
-"""LLM routing — Mistral (deep) + OpenRouter (fast/tools).
-Both use OpenAI-compatible endpoints so agent.py needs zero changes.
+"""LLM routing — Mistral (deep) + OpenRouter (fast) + Groq (tools).
+All use OpenAI-compatible endpoints so agent.py needs zero changes.
 """
 
 from openai import AsyncOpenAI
@@ -7,6 +7,7 @@ from openai import AsyncOpenAI
 from core.config import (
     MISTRAL_API_KEY,
     OPENROUTER_API_KEY,
+    GROQ_API_KEY,
     MODEL_DEEP,
     MODEL_FAST,
     MODEL_TOOLS,
@@ -22,6 +23,11 @@ mistral_client = AsyncOpenAI(
 openrouter_client = AsyncOpenAI(
     api_key=OPENROUTER_API_KEY,
     base_url="https://openrouter.ai/api/v1",
+)
+
+groq_client = AsyncOpenAI(
+    api_key=GROQ_API_KEY,
+    base_url="https://api.groq.com/openai/v1",
 )
 
 # ── Tool keyword classifier ───────────────────────────────────────────────────
@@ -49,9 +55,9 @@ def needs_tools(message: str) -> bool:
 def get_client_and_model(mode: str) -> tuple:
     """
     Modes:
-        "deep"  — Mistral Large (smart, research, conversation)
+        "deep"  — Mistral Small (smart, research, conversation)
         "fast"  — OpenRouter Llama 3.1 8B (casual, low latency)
-        "tools" — OpenRouter Llama 3.1 8B (function calling)
+        "tools" — Groq Llama 3.1 8B Instant (free, great at function calling)
     """
     match mode:
         case "deep":
@@ -59,6 +65,6 @@ def get_client_and_model(mode: str) -> tuple:
         case "fast":
             return openrouter_client, MODEL_FAST
         case "tools":
-            return openrouter_client, MODEL_TOOLS
+            return groq_client, MODEL_TOOLS
         case _:
             return openrouter_client, MODEL_FAST
