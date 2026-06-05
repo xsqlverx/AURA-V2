@@ -1,7 +1,6 @@
 """All environment variables and constants. Single source of truth for the entire app."""
 
 import os
-import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -47,7 +46,8 @@ MEMORY_NUDGE_INTERVAL = 10   # turns between memory-save reminders
 # ── Voice ─────────────────────────────────────────────────────────────────────
 UI_SOCKET_PORT = 9_001
 
-KOKORO_VOICE = os.getenv("KOKORO_VOICE", "af_heart")
+# Supertonic voice style name. 10 built-ins: M1-M5 (male), F1-F5 (female).
+TTS_VOICE = os.getenv("TTS_VOICE", "M1")
 
 PICOVOICE_KEY   = os.getenv("PICOVOICE_KEY")
 _wake_word_path = os.getenv("WAKE_WORD_PATH")

@@ -82,15 +82,20 @@ if __name__ == "__main__":
         from voice.tts import TTSEngine
         from voice import pipeline as voice_pipeline
         from tools import hotkeys
-        from core.config import KOKORO_VOICE
+        from core.config import TTS_VOICE
 
         try:
-            tts = TTSEngine(voice=KOKORO_VOICE)
+            tts = TTSEngine(voice=TTS_VOICE)
         except Exception as e:
             logger.warning("Voice pipeline disabled — failed to init TTS: %s", e)
             tts = None
 
         if tts is not None:
+            try:
+                from comms.state import set_tts
+                set_tts(tts)
+            except Exception as e:
+                logger.warning("Could not register TTS in comms.state: %s", e)
             try:
                 hotkeys.set_tts(tts)
                 hotkeys.start_hotkeys()

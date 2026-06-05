@@ -14,6 +14,7 @@ soundfile
 faster-whisper
 pvporcupine
 pvrecorder
+supertonic
 # Pinned for compatibility and stability
 chromadb==0.4.24
 numpy==1.26.4

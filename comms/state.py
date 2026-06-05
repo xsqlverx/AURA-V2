@@ -1,5 +1,5 @@
 """
-Active Discord session state.
+Active Discord session state + shared TTS engine reference.
 Thread-safe. Tracks session mode, message summary, and last activity time.
 """
 
@@ -8,6 +8,11 @@ import time
 
 _lock = threading.Lock()
 _session: dict | None = None
+
+# TTS engine registry — set once at startup in main.py, read by the FastAPI
+# server (different thread/process boundary, but same process) to expose
+# voice-switching endpoints and broadcast voice changes to the UI.
+_tts = None
 
 
 def set_session(user_id: str, username: str, mode: str = "single") -> None:
@@ -76,3 +81,18 @@ def get_summary() -> list:
 def get_last_activity() -> float:
     with _lock:
         return _session["last_activity"] if _session else 0.0
+
+
+# ── TTS engine registry ───────────────────────────────────────────────────────
+
+def set_tts(tts_engine) -> None:
+    """Register the singleton TTS engine for cross-thread access."""
+    global _tts
+    with _lock:
+        _tts = tts_engine
+
+
+def get_tts():
+    """Return the registered TTS engine, or None if not yet initialized."""
+    with _lock:
+        return _tts

@@ -49,6 +49,35 @@ _END_KEYWORDS = {
     "wrap it up", "finish", "close session", "done",
 }
 
+_VOICE_RE = re.compile(r"\b([MF])([1-5])\b", re.IGNORECASE)
+
+_GENDER_MAP = {
+    "a guy": "M5", "the guy": "M5", "a male": "M5", "the male": "M5",
+    "a man": "M5", "the man": "M5", "a boy": "M5", "the boy": "M5",
+    "a girl": "F1", "the girl": "F1", "a female": "F1", "the female": "F1",
+    "a woman": "F1", "the woman": "F1", "a lady": "F1", "the lady": "F1",
+    "guy voice": "M5", "male voice": "M5", "man voice": "M5",
+    "girl voice": "F1", "female voice": "F1", "woman voice": "F1",
+}
+
+_VOICE_INTENT_KEYWORDS = {
+    "switch voice", "change voice", "use a different voice", "new voice",
+    "different voice", "voice change", "change the voice",
+    "list voices", "what voices", "which voices",
+    "what voice", "current voice", "which voice",
+    # broader conversational forms — 3+ words to minimise false positives
+    "switch your voice", "change your voice",
+    "deep voice", "high voice", "softer voice", "deeper voice",
+    "lower voice", "higher voice",
+    # gender-specific phrases that won't easily false-positive
+    "male voice", "female voice", "guy voice", "girl voice",
+    "man voice", "woman voice", "boy voice", "lady voice",
+    # no-article gender-switch patterns (very specific, low false-positive)
+    "switch to male", "switch to female",
+    "switch to guy", "switch to girl",
+    "switch to man", "switch to woman",
+}
+
 ptt_active = threading.Event()
 _stop      = threading.Event()
 
@@ -245,6 +274,149 @@ def _handle_end_session(tts) -> None:
     end_session_with_summary()
 
 
+# ── Voice switch (keyword + Groq LLM double-check) ────────────────────────────
+
+def _llm_confirm_voice_intent(user_text: str) -> dict:
+    """Cheap Groq call that classifies the spoken text as a voice-switch
+    request and extracts the target voice. Returns one of:
+
+        {"intent": "switch",   "voice": "F2"}
+        {"intent": "list"}
+        {"intent": "current"}
+        {"intent": "none"}
+
+    Falls back to {"intent": "none"} on any error so the keyword layer
+    remains the source of truth.
+    """
+    import json
+    from groq import Groq
+    from core.config import GROQ_API_KEY
+
+    system = (
+        "You classify short voice-pipeline commands about TTS voices. "
+        "Valid voice codes are M1-M5 and F1-F5. "
+        "Map conversational gender references: "
+        "guy/male/man/boy -> M5 (a deep male voice), "
+        "girl/female/woman/lady -> F1 (the default female voice). "
+        "Respond with ONLY a JSON object with keys: "
+        "'intent' (one of: switch, list, current, none) and "
+        "'voice' (a valid voice code, or null). "
+        "Examples: "
+        '{"intent":"switch","voice":"F2"} '
+        '{"intent":"list"} '
+        '{"intent":"current"} '
+        '{"intent":"none"} '
+        '{"intent":"switch","voice":"M5"}  ("to a guy" -> M5) '
+        '{"intent":"switch","voice":"F1"}  ("to a girl" -> F1)'
+    )
+    try:
+        client = Groq(api_key=GROQ_API_KEY)
+        completion = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_text},
+            ],
+            temperature=0,
+            max_tokens=40,
+            response_format={"type": "json_object"},
+        )
+        raw = completion.choices[0].message.content.strip()
+        data = json.loads(raw)
+        intent = data.get("intent", "none")
+        if intent not in ("switch", "list", "current", "none"):
+            intent = "none"
+        voice = data.get("voice")
+        if voice is not None:
+            voice = str(voice).strip().upper()
+            if not _VOICE_RE.fullmatch(voice):
+                voice = None
+                if intent == "switch":
+                    intent = "none"
+        return {"intent": intent, "voice": voice}
+    except Exception as e:
+        logger.warning("Voice intent LLM check failed: %s", e)
+        return {"intent": "none", "voice": None}
+
+
+def _broadcast_voice_change(voice_name: str) -> None:
+    """Notify the UI that the active voice changed (over the 9001 socket
+    bridge, which the FastAPI server then re-broadcasts over WebSocket)."""
+    try:
+        _send_socket(f"VOICE_CHANGED:{voice_name}")
+    except Exception:
+        pass
+
+
+def _handle_voice_switch(tts, user_text: str) -> None:
+    """Layered voice-switch: keyword + Groq LLM double-check. Both must agree
+    that the user is asking to switch (or list) voices. If they conflict we
+    do nothing and tell the user."""
+
+    lowered = user_text.lower()
+
+    voice_match = _VOICE_RE.search(user_text)
+    if voice_match:
+        candidate = voice_match.group(0).upper()
+    else:
+        candidate = None
+
+    # Gender-based candidate from conversational phrases
+    if candidate is None:
+        for phrase, code in _GENDER_MAP.items():
+            if phrase in lowered:
+                candidate = code
+                break
+
+    asks_to_list = any(kw in lowered for kw in (
+        "list voices", "what voices", "which voices",
+    ))
+    asks_current = any(kw in lowered for kw in (
+        "what voice", "current voice", "which voice",
+    ))
+    asks_switch = candidate is not None or any(
+        kw in lowered for kw in _VOICE_INTENT_KEYWORDS
+    )
+
+    if not (asks_switch or asks_to_list or asks_current):
+        return
+
+    decision = _llm_confirm_voice_intent(user_text)
+    logger.info("Voice intent: keyword=%s/%s, llm=%s",
+                candidate, "switch" if asks_switch else "list" if asks_to_list else "current",
+                decision)
+
+    if decision["intent"] == "none":
+        tts.speak(
+            "I want to be sure — did you mean to change my voice? "
+            "Say something like: switch to F2, or list voices."
+        )
+        return
+
+    if decision["intent"] == "current" or asks_current and not asks_switch and not asks_to_list:
+        tts.speak(f"I'm currently using voice {tts.get_current_voice()}.")
+        return
+
+    if decision["intent"] == "list":
+        opts = tts.list_voices()
+        tts.speak("Available voices are: " + ", ".join(opts) + ".")
+        return
+
+    target = (decision.get("voice") or candidate)
+    if not target:
+        tts.speak(
+            "I caught the voice-switch intent but no voice name. "
+            "Try: switch to F2."
+        )
+        return
+
+    if tts.set_voice(target):
+        tts.speak(f"Switched to voice {target}.")
+        _broadcast_voice_change(target)
+    else:
+        tts.speak(f"Sorry, I couldn't load voice {target}.")
+
+
 # ── Chat → TTS stream ─────────────────────────────────────────────────────────
 
 def stream_to_tts(text: str, history: list, tts) -> str:
@@ -365,6 +537,13 @@ def run_session(tts, whisper, history: list, ptt_mode: bool = False):
     # ── Briefing ──────────────────────────────────────────────────────────────
     if _matches(user_text, _BRIEFING_KEYWORDS):
         _handle_briefing(tts)
+        tts.wait_until_done()
+        send_state("idle")
+        return
+
+    # ── Voice switch (keyword + Groq LLM double-check) ────────────────────────
+    if _matches(user_text, _VOICE_INTENT_KEYWORDS) or _VOICE_RE.search(user_text):
+        _handle_voice_switch(tts, user_text)
         tts.wait_until_done()
         send_state("idle")
         return

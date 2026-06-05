@@ -190,6 +190,10 @@ class NoteUpdate(BaseModel):
     content: str = ""
 
 
+class VoiceSelectRequest(BaseModel):
+    voice: str
+
+
 _FRIENDS_PATH = Path(__file__).parent.parent / "data" / "friends.json"
 _NOTES_PATH = Path(__file__).parent.parent / "data" / "notes.json"
 
@@ -530,6 +534,38 @@ async def discord_polish(req: DiscordPolishRequest):
     except Exception as e:
         logger.error("discord_polish failed: %s", e)
         return {"success": False, "error": str(e)}
+
+
+# ── Voice (TTS) ────────────────────────────────────────────────────────────────
+
+@app.get("/voice/options")
+async def voice_options():
+    """List built-in Supertonic voices and report the currently active one."""
+    from comms.state import get_tts
+    tts = get_tts()
+    if tts is None:
+        return {"voices": [], "current": None}
+    return {
+        "voices": tts.list_voices(),
+        "current": tts.get_current_voice(),
+    }
+
+
+@app.post("/voice/select")
+async def voice_select(req: VoiceSelectRequest):
+    """Switch the active built-in voice at runtime. Broadcasts VOICE_CHANGED
+    over the 9001 socket so all UI clients update in sync."""
+    from comms.state import get_tts
+    tts = get_tts()
+    if tts is None:
+        raise HTTPException(status_code=503, detail="TTS not initialized")
+    if tts.set_voice(req.voice):
+        try:
+            await ws_manager.broadcast(f"VOICE_CHANGED:{req.voice.upper()}")
+        except Exception:
+            pass
+        return {"current": tts.get_current_voice()}
+    raise HTTPException(status_code=400, detail=f"Invalid voice: {req.voice}")
 
 
 # ── System Stats ───────────────────────────────────────────────────────────────
