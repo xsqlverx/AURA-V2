@@ -41,13 +41,16 @@ MEMORY_DEDUP_THRESHOLD      = 0.95
 MEMORY_DIR           = Path(__file__).parent.parent / "data" / "memories"
 MEMORY_CHAR_LIMIT    = 2200   # max chars for agent's self-memories (MEMORY.md)
 USER_CHAR_LIMIT      = 1375   # max chars for user profile (USER.md)
-MEMORY_NUDGE_INTERVAL = 10   # turns between memory-save reminders
+MEMORY_AUTOSAVE_INTERVAL = 3   # turns between proactive memory-save nudges
 
 # ── Voice ─────────────────────────────────────────────────────────────────────
 UI_SOCKET_PORT = 9_001
 
-# Supertonic voice style name. 10 built-ins: M1-M5 (male), F1-F5 (female).
-TTS_VOICE = os.getenv("TTS_VOICE", "M1")
+# TTS provider: "edge" (primary, cloud) or "kokoro" (fallback, local).
+TTS_PROVIDER = os.getenv("TTS_PROVIDER", "edge")
+
+# Edge / Kokoro voice name (default: en-US-AvaNeural for Edge, af_bella for Kokoro)
+TTS_VOICE = os.getenv("TTS_VOICE", "en-US-AvaNeural")
 
 PICOVOICE_KEY   = os.getenv("PICOVOICE_KEY")
 _wake_word_path = os.getenv("WAKE_WORD_PATH")

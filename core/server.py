@@ -215,6 +215,13 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/weather")
+async def weather():
+    """Return current weather data (cached from wttr.in)."""
+    from memory.context import get_weather_data
+    return await get_weather_data()
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws_manager.connect(ws)
@@ -540,7 +547,7 @@ async def discord_polish(req: DiscordPolishRequest):
 
 @app.get("/voice/options")
 async def voice_options():
-    """List built-in Supertonic voices and report the currently active one."""
+    """List available TTS voices and report the currently active one."""
     from comms.state import get_tts
     tts = get_tts()
     if tts is None:
@@ -553,7 +560,7 @@ async def voice_options():
 
 @app.post("/voice/select")
 async def voice_select(req: VoiceSelectRequest):
-    """Switch the active built-in voice at runtime. Broadcasts VOICE_CHANGED
+    """Switch the active TTS voice at runtime. Broadcasts VOICE_CHANGED
     over the 9001 socket so all UI clients update in sync."""
     from comms.state import get_tts
     tts = get_tts()

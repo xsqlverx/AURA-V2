@@ -49,15 +49,19 @@ _END_KEYWORDS = {
     "wrap it up", "finish", "close session", "done",
 }
 
-_VOICE_RE = re.compile(r"\b([MF])([1-5])\b", re.IGNORECASE)
-
-_GENDER_MAP = {
-    "a guy": "M5", "the guy": "M5", "a male": "M5", "the male": "M5",
-    "a man": "M5", "the man": "M5", "a boy": "M5", "the boy": "M5",
-    "a girl": "F1", "the girl": "F1", "a female": "F1", "the female": "F1",
-    "a woman": "F1", "the woman": "F1", "a lady": "F1", "the lady": "F1",
-    "guy voice": "M5", "male voice": "M5", "man voice": "M5",
-    "girl voice": "F1", "female voice": "F1", "woman voice": "F1",
+GENDER_MAP = {
+    "a guy": "M1", "the guy": "M1",
+    "a male": "M1", "the male": "M1",
+    "a man": "M1", "the man": "M1",
+    "a boy": "M1", "the boy": "M1",
+    "a girl": "F1", "the girl": "F1",
+    "a female": "F1", "the female": "F1",
+    "a woman": "F1", "the woman": "F1",
+    "a lady": "F1", "the lady": "F1",
+    "guy voice": "M1", "male voice": "M1",
+    "man voice": "M1",
+    "girl voice": "F1", "female voice": "F1",
+    "woman voice": "F1",
 }
 
 _VOICE_INTENT_KEYWORDS = {
@@ -278,15 +282,14 @@ def _handle_end_session(tts) -> None:
 
 def _llm_confirm_voice_intent(user_text: str) -> dict:
     """Cheap Groq call that classifies the spoken text as a voice-switch
-    request and extracts the target voice. Returns one of:
+    request. Returns one of:
 
-        {"intent": "switch",   "voice": "F2"}
+        {"intent": "switch"}
         {"intent": "list"}
         {"intent": "current"}
         {"intent": "none"}
 
-    Falls back to {"intent": "none"} on any error so the keyword layer
-    remains the source of truth.
+    Falls back to {"intent": "none"} on any error.
     """
     import json
     from groq import Groq
@@ -294,20 +297,13 @@ def _llm_confirm_voice_intent(user_text: str) -> dict:
 
     system = (
         "You classify short voice-pipeline commands about TTS voices. "
-        "Valid voice codes are M1-M5 and F1-F5. "
-        "Map conversational gender references: "
-        "guy/male/man/boy -> M5 (a deep male voice), "
-        "girl/female/woman/lady -> F1 (the default female voice). "
-        "Respond with ONLY a JSON object with keys: "
-        "'intent' (one of: switch, list, current, none) and "
-        "'voice' (a valid voice code, or null). "
+        "Respond with ONLY a JSON object with key 'intent': "
+        "one of: switch, list, current, none. "
         "Examples: "
-        '{"intent":"switch","voice":"F2"} '
-        '{"intent":"list"} '
-        '{"intent":"current"} '
-        '{"intent":"none"} '
-        '{"intent":"switch","voice":"M5"}  ("to a guy" -> M5) '
-        '{"intent":"switch","voice":"F1"}  ("to a girl" -> F1)'
+        '{"intent":"switch"}  ("change your voice", "use a different voice") '
+        '{"intent":"list"}    ("what voices do you have", "list voices") '
+        '{"intent":"current"} ("what voice are you using", "current voice") '
+        '{"intent":"none"}'
     )
     try:
         client = Groq(api_key=GROQ_API_KEY)
@@ -326,17 +322,10 @@ def _llm_confirm_voice_intent(user_text: str) -> dict:
         intent = data.get("intent", "none")
         if intent not in ("switch", "list", "current", "none"):
             intent = "none"
-        voice = data.get("voice")
-        if voice is not None:
-            voice = str(voice).strip().upper()
-            if not _VOICE_RE.fullmatch(voice):
-                voice = None
-                if intent == "switch":
-                    intent = "none"
-        return {"intent": intent, "voice": voice}
+        return {"intent": intent}
     except Exception as e:
         logger.warning("Voice intent LLM check failed: %s", e)
-        return {"intent": "none", "voice": None}
+        return {"intent": "none"}
 
 
 def _broadcast_voice_change(voice_name: str) -> None:
@@ -349,23 +338,24 @@ def _broadcast_voice_change(voice_name: str) -> None:
 
 
 def _handle_voice_switch(tts, user_text: str) -> None:
-    """Layered voice-switch: keyword + Groq LLM double-check. Both must agree
-    that the user is asking to switch (or list) voices. If they conflict we
-    do nothing and tell the user."""
+    """Voice-switch: keyword + Groq LLM double-check."""
 
     lowered = user_text.lower()
+    available = tts.list_voices()
 
-    voice_match = _VOICE_RE.search(user_text)
-    if voice_match:
-        candidate = voice_match.group(0).upper()
-    else:
-        candidate = None
+    # Gender-based candidate
+    candidate = None
+    for phrase, code in GENDER_MAP.items():
+        if phrase in lowered:
+            candidate = code
+            break
 
-    # Gender-based candidate from conversational phrases
+    # Try to extract a voice name from the text (e.g. "switch to en-US-JennyNeural")
     if candidate is None:
-        for phrase, code in _GENDER_MAP.items():
-            if phrase in lowered:
-                candidate = code
+        for v in available:
+            name_lower = v.lower()
+            if name_lower in lowered:
+                candidate = v
                 break
 
     asks_to_list = any(kw in lowered for kw in (
@@ -382,14 +372,12 @@ def _handle_voice_switch(tts, user_text: str) -> None:
         return
 
     decision = _llm_confirm_voice_intent(user_text)
-    logger.info("Voice intent: keyword=%s/%s, llm=%s",
-                candidate, "switch" if asks_switch else "list" if asks_to_list else "current",
-                decision)
+    logger.info("Voice intent: candidate=%s, llm=%s", candidate, decision)
 
     if decision["intent"] == "none":
         tts.speak(
             "I want to be sure — did you mean to change my voice? "
-            "Say something like: switch to F2, or list voices."
+            "Say something like: switch to a male voice, or list voices."
         )
         return
 
@@ -398,23 +386,24 @@ def _handle_voice_switch(tts, user_text: str) -> None:
         return
 
     if decision["intent"] == "list":
-        opts = tts.list_voices()
-        tts.speak("Available voices are: " + ", ".join(opts) + ".")
+        if len(available) > 20:
+            tts.speak(f"There are {len(available)} voices available. Try saying switch to a male voice or switch to Jenny.")
+        else:
+            tts.speak("Available voices: " + ", ".join(available[:20]) + ".")
         return
 
-    target = (decision.get("voice") or candidate)
-    if not target:
+    if not candidate:
         tts.speak(
-            "I caught the voice-switch intent but no voice name. "
-            "Try: switch to F2."
+            "I caught the voice-switch intent but didn't catch which voice. "
+            "Try: switch to a male voice, or switch to Jenny."
         )
         return
 
-    if tts.set_voice(target):
-        tts.speak(f"Switched to voice {target}.")
-        _broadcast_voice_change(target)
+    if tts.set_voice(candidate):
+        tts.speak(f"Switched to {candidate}.")
+        _broadcast_voice_change(candidate)
     else:
-        tts.speak(f"Sorry, I couldn't load voice {target}.")
+        tts.speak(f"Sorry, I couldn't load voice {candidate}.")
 
 
 # ── Chat → TTS stream ─────────────────────────────────────────────────────────
@@ -542,7 +531,7 @@ def run_session(tts, whisper, history: list, ptt_mode: bool = False):
         return
 
     # ── Voice switch (keyword + Groq LLM double-check) ────────────────────────
-    if _matches(user_text, _VOICE_INTENT_KEYWORDS) or _VOICE_RE.search(user_text):
+    if _matches(user_text, _VOICE_INTENT_KEYWORDS):
         _handle_voice_switch(tts, user_text)
         tts.wait_until_done()
         send_state("idle")

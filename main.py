@@ -79,13 +79,13 @@ if __name__ == "__main__":
     # ── Voice pipeline ────────────────────────────────────────────────────────
     tts = None
     try:
-        from voice.tts import TTSEngine
+        from voice.tts import create_engine
         from voice import pipeline as voice_pipeline
         from tools import hotkeys
-        from core.config import TTS_VOICE
+        from core.config import TTS_PROVIDER, TTS_VOICE
 
         try:
-            tts = TTSEngine(voice=TTS_VOICE)
+            tts = create_engine(provider=TTS_PROVIDER, voice=TTS_VOICE)
         except Exception as e:
             logger.warning("Voice pipeline disabled — failed to init TTS: %s", e)
             tts = None

@@ -15,7 +15,7 @@ from pathlib import Path
 
 from core.config import PICOVOICE_KEY, UI_SOCKET_PORT, WAKE_WORD_PATH
 from voice.stt import WhisperSTT
-from voice.tts import TTSEngine
+from voice.tts import BaseTTSEngine
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ class WakeWordDetector:
         self,
         *,
         on_wake: Callable[[], None],
-        tts: TTSEngine | None = None,
+        tts: BaseTTSEngine | None = None,
     ) -> None:
         self._on_wake = on_wake
         self._tts = tts
