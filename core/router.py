@@ -58,7 +58,7 @@ def get_client_and_model(mode: str) -> tuple:
     Modes:
         "deep"  — Mistral Small (smart, research, conversation)
         "fast"  — OpenRouter Llama 3.1 8B (casual, low latency)
-        "tools" — Groq Llama 3.1 8B Instant (free, great at function calling)
+        "tools" — Groq Mixtral 8x7B (reliable function calling)
     """
     match mode:
         case "deep":

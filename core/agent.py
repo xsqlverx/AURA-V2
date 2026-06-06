@@ -27,7 +27,26 @@ def _scrub(text: str) -> str:
         text = text.replace(tag, "").replace(tag.upper(), "")
     # Strip <memory ...> and </memory> tags that leak from the LLM
     text = re.sub(r"</?memory[^>]*>", "", text, flags=re.IGNORECASE)
+    # Strip <function=toolname>...<function=toolname> or </function> leaks
+    text = re.sub(r"</?function[^>]*>", "", text, flags=re.IGNORECASE)
     return text
+
+
+def _parse_native_function(text: str) -> list[dict]:
+    """Parse Llama-style <function=name {...} </function> patterns from text.
+    Returns [{"name": str, "arguments": dict, "full_match": str}, ...]."""
+    calls = []
+    # Handles: <function=name>JSON<function=name>, <function=name JSON </function>,
+    #          <function=name={JSON}</function> (any separator: >, space, or =)
+    for m in re.finditer(r'<function=(\w+)[=>\s]+(\{.*?\})\s*(?:</function>|<function=\1>)', text, re.DOTALL):
+        name = m.group(1)
+        raw = m.group(2)
+        try:
+            args = json.loads(raw)
+            calls.append({"name": name, "arguments": args, "full_match": m.group(0)})
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse native function args for %s: %s", name, raw)
+    return calls
 
 # ── System Prompt ─────────────────────────────────────────────────────────────
 
@@ -67,12 +86,14 @@ Use it PROACTIVELY whenever you learn something worth remembering:
 - Corrections the user gives you — save them immediately
 - Environment facts ("my downloads are in D:\\stuff")
 - Conventions or habits the user follows
-When the user says "remember", "keep that in mind", or "don't forget", call the tool. \
-Don't ask for permission — just save it. \
+WHEN the user says "remember", "don't forget", or "keep that in mind": \
+you MUST call the memory tool with action="add". This is REQUIRED, not optional. \
+Don't confirm in text — just call the tool. \
 SKIP temporary/session-specific things (task progress, one-off file paths, ephemera). \
 Use category "user" for facts about the user, "self" for your own operational notes. \
-IMPORTANT: Never output XML tags or markup in your responses. Use the function calling API \
-for tool calls, not text. Never write `<memory>`, `<search>`, or any XML-like tags."""
+CRITICAL RULE: Never write tool calls as text or XML. \
+Use the function calling API ONLY. No `<memory>` tags, no `<search>` tags, \
+no describing tool calls in your response text. Just call the function."""
 
 
 async def _build_system_prompt() -> str:
@@ -224,14 +245,15 @@ async def run(
     tool_rounds = 0
 
     while tool_rounds < MAX_TOOL_ROUNDS:
-        # Use Groq for tool calls, OpenRouter fallback on 429
+        # Use Groq for tool calls, OpenRouter fallback on 429.
+        # NOTE: tools=TOOLS deliberately omitted — Llama 3.3 on Groq uses native
+        # <function=name> format in text; sending tools= causes tool_use_failed errors.
+        # Native function calls are parsed server-side by _parse_native_function().
         try:
             client, model = get_client_and_model("tools")
             response = await client.chat.completions.create(
                 model=model,
                 messages=messages,
-                tools=TOOLS,
-                tool_choice="auto",
                 max_tokens=1024,
                 stream=False,
             )
@@ -244,8 +266,6 @@ async def run(
                 response = await client.chat.completions.create(
                     model=model,
                     messages=messages,
-                    tools=TOOLS,
-                    tool_choice="auto",
                     max_tokens=1024,
                     stream=False,
                 )
@@ -272,8 +292,34 @@ async def run(
             continue
 
         # ── No tool calls — model gave a direct answer ────────────────────────
-        # This shouldn't happen often but handle it gracefully
+        # Check for Llama-native <function=name> format first
         if msg.content:
+            native_calls = _parse_native_function(msg.content)
+            if native_calls:
+                cleaned = msg.content
+                tool_calls = []
+                import uuid
+                for nc in native_calls:
+                    cleaned = cleaned.replace(nc["full_match"], "")
+                    tc_id = f"call_{uuid.uuid4().hex[:12]}"
+                    tool_calls.append({
+                        "id": tc_id,
+                        "type": "function",
+                        "function": {"name": nc["name"], "arguments": json.dumps(nc["arguments"])},
+                    })
+                cleaned = cleaned.strip()
+                fake_msg = {"role": "assistant", "content": None, "tool_calls": tool_calls}
+                messages.append(fake_msg)
+                for tc in tool_calls:
+                    name = tc["function"]["name"]
+                    args = json.loads(tc["function"]["arguments"])
+                    logger.info("Native function call: %s(%s)", name, args)
+                    result = await _run_tool(name, args)
+                    logger.info("Native function result: %s", result)
+                    messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
+                tool_rounds += 1
+                continue
+
             yield _scrub(msg.content)
             chroma_store.save(f"User: {message}")
             chroma_store.save(f"Aura: {msg.content}")

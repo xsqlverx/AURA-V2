@@ -24,7 +24,7 @@ if _MISSING:
 # ── LLM Models ───────────────────────────────────────────────────────────────
 MODEL_DEEP  = "mistral-small-latest"                   # Mistral — free tier, smart
 MODEL_FAST  = "meta-llama/llama-3.1-8b-instruct"      # OpenRouter — fast/casual
-MODEL_TOOLS = "llama-3.1-8b-instant"                   # Groq — free, great at function calling
+MODEL_TOOLS = "llama-3.3-70b-versatile"               # Groq — reliable function calling
 
 # ── Server ───────────────────────────────────────────────────────────────────
 SERVER_HOST = "127.0.0.1"
