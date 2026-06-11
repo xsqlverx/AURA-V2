@@ -159,6 +159,7 @@ async def _run_tool(name: str, args: dict) -> str:
             case "list_directory":          result = system.list_directory(args.get("dir_path", "."))
             case "web_search":              result = await web.web_search(args.get("query", ""))
             case "open_website":            result = system.open_website(args.get("url", ""))
+            case "open_z_agent":            result = system.open_z_agent(args.get("elaborated_prompt", ""))
             case "get_system_stats":        result = system.get_system_stats()
             case "shutdown":                result = system.shutdown(args.get("delay_seconds", 20))
             case "restart":                 result = system.restart(args.get("delay_seconds", 30))

@@ -162,6 +162,27 @@ def list_directory(dir_path: str = ".") -> dict:
 
 # ── Web ───────────────────────────────────────────────────────────────────────
 
+Z_AGENT_TOGGLE = (645, 236)
+Z_CHAT_INPUT   = (662, 666)
+
+def open_z_agent(elaborated_prompt: str) -> dict:
+    import pyautogui, webbrowser, time
+    try:
+        webbrowser.open("https://chat.z.ai")
+        time.sleep(4)
+        pyautogui.hotkey('f11')
+        time.sleep(1)
+        pyautogui.click(*Z_AGENT_TOGGLE)
+        time.sleep(0.5)
+        pyautogui.click(*Z_CHAT_INPUT)
+        time.sleep(0.3)
+        pyautogui.write(elaborated_prompt, interval=0.015)
+        time.sleep(0.2)
+        pyautogui.press('enter')
+        return {"success": True, "submitted": elaborated_prompt[:80] + "..."}
+    except Exception as e:
+        return {"error": str(e)}
+
 def open_website(url: str) -> dict:
     try:
         if not url.startswith(("http://", "https://")):

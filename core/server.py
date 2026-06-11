@@ -97,6 +97,31 @@ def _start_socket_bridge() -> None:
     t.start()
 
 
+# ── TTS response helper ───────────────────────────────────────────────────────
+# Feeds UI chat/briefing responses to the TTS engine so Aura speaks them aloud.
+
+def _speak_response(text: str) -> None:
+    """Feed text to TTS (non-blocking) and broadcast speaking/idle states."""
+    if not text.strip():
+        return
+    try:
+        from comms.state import get_tts
+        tts = get_tts()
+        if tts is None:
+            return
+        ws_manager.broadcast_sync("STATE:speaking")
+        tts.speak(text)
+        threading.Thread(target=_wait_tts_idle, args=(tts,), daemon=True).start()
+    except Exception as e:
+        logger.warning("TTS speak failed: %s", e)
+
+
+def _wait_tts_idle(tts) -> None:
+    """Thread target: wait for TTS to finish, then broadcast idle."""
+    tts.wait_until_done()
+    ws_manager.broadcast_sync("STATE:idle")
+
+
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
@@ -325,24 +350,31 @@ async def chat(req: ChatRequest):
                         yield delta
                 chroma_store.save(f"User: (briefing request)")
                 chroma_store.save(f"Aura: {''.join(full)}")
+                _speak_response("".join(full))
             except Exception as e:
                 logger.error("Briefing error: %s", e)
-                yield "I tried to gather a briefing, but ran into an error. Please try again."
+                err_msg = "I tried to gather a briefing, but ran into an error. Please try again."
+                yield err_msg
+                _speak_response(err_msg)
 
         return StreamingResponse(briefing_gen(), media_type="text/plain")
 
     # Normal chat path
     async def generate():
+        full_response = []
         try:
             async for chunk in agent.run(
                 message=req.message,
                 history=req.history,
                 mode=req.mode,
             ):
+                full_response.append(chunk)
                 yield chunk
         except Exception as e:
             logger.error("Stream error: %s", e)
             yield "\n[Aura encountered an error. Please try again.]"
+
+        _speak_response("".join(full_response))
 
     return StreamingResponse(generate(), media_type="text/plain")
 

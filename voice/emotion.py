@@ -22,8 +22,7 @@ SUPPORTED = frozenset({
 
 def parse(text: str):
     """Extract an emotion tag from the start or end of text.
-
-    Returns (tag, clean_text) or (None, text).
+        Returns (tag, clean_text) or (None, text).
     """
     m = START_TAG_RE.match(text)
     if m:

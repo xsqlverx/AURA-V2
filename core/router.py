@@ -35,6 +35,7 @@ _TOOL_KEYWORDS = {
     "volume", "mute", "unmute", "louder", "quieter", "play", "pause",
     "next track", "previous track", "skip", "music",
     "open", "launch", "start", "close", "run", "app",
+    "make", "create", "generate", "build",
     "shutdown", "restart", "reboot", "sleep", "lock", "hibernate",
     "cancel shutdown",
     "file", "folder", "directory", "create folder", "list files",
