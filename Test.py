@@ -193,6 +193,16 @@ def test_vault():
     check("vault_list", any(w in r.lower() for w in ["note", "aura", "test_note"]), r[:80])
 
 
+def test_study():
+    section("STUDY")
+
+    r = chat("Quiz me on Kerala using my vault notes")
+    check("study_quiz", any(w in r.lower() for w in ["question", "quiz", "what", "answer"]), r[:80])
+
+    r = chat("Summarize what I know about Kochi from my vault")
+    check("study_summarize", any(w in r.lower() for w in ["kochi", "location", "note", "summary"]), r[:80])
+
+
 def test_input():
     section("INPUT CONTROL")
 
@@ -276,6 +286,7 @@ if __name__ == "__main__":
     test_system()
     test_clipboard()
     test_vault()
+    test_study()
     test_input()
     test_memory()
     test_z_agent()

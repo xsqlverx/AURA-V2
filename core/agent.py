@@ -15,6 +15,7 @@ from memory.store import get_store
 from memory import vault as vault_module
 from tools.registry import TOOLS, TOOL_NAMES
 from tools import system, web
+from tools.study import study as study_fn
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,16 @@ ACTIONS:
 
 Keep vault responses very short. Do NOT read note contents aloud.
 Just say "Found it" / "Created" / "Done" / "Not found" and move on.
+
+## Study Workflows
+You have a `study` tool for studying from your vault notes.
+When the user asks to quiz, summarize, or draft assignments:
+1. Call `<function=study {"topic":"...","action":"quiz"|"summarize"|"draft"}<function=study>`
+2. It returns the relevant notes content
+3. Generate the output from that content — quiz questions, summary, or draft
+
+Keep study responses focused. For quizzes: give 3-5 questions, then ask if
+they want answers. For summaries: 2-3 paragraphs covering key points.
 
 ## Z.ai Agent Mode (App Generation)
 When the user asks you to MAKE, CREATE, BUILD, or GENERATE an app/website/
@@ -227,6 +238,11 @@ async def _run_tool(name: str, args: dict) -> str:
                     category=args.get("category", "user"),
                     text=args.get("text", ""),
                     identifier=args.get("identifier", ""),
+                )
+            case "study":
+                result = study_fn(
+                    topic=args.get("topic", ""),
+                    action=args.get("action", "quiz"),
                 )
             case _:
                 result = {"error": f"Unhandled tool: {name}"}

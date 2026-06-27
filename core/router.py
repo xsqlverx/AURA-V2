@@ -54,6 +54,11 @@ _TOOL_KEYWORDS = {
     "what was", "what did i", "do i have",
     "anything about", "tell me about",
     "is there a", "find me",
+    # Study workflows
+    "quiz", "quizz", "test me", "practice",
+    "summarize", "summarise", "summary",
+    "draft", "assignment", "help me with",
+    "study", "revise", "review", "go over",
 }
 
 
