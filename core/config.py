@@ -27,9 +27,13 @@ MODEL_FAST  = "meta-llama/llama-3.1-8b-instruct"      # OpenRouter — fast/casu
 MODEL_TOOLS = "llama-3.3-70b-versatile"               # Groq — reliable function calling
 
 # ── Server ───────────────────────────────────────────────────────────────────
-SERVER_HOST = "127.0.0.1"
-SERVER_PORT = 8000
-SERVER_URL  = f"http://{SERVER_HOST}:{SERVER_PORT}"
+SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
+SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))
+# Internal URL for local clients (voice pipeline, Discord bot, etc. connect here)
+SERVER_URL  = f"http://127.0.0.1:{SERVER_PORT}"
+
+# Mobile API key for external access (Tailscale + auth)
+MOBILE_API_KEY = os.getenv("MOBILE_API_KEY", "")
 
 # ── Memory ───────────────────────────────────────────────────────────────────
 CHROMA_PATH                 = Path(__file__).parent.parent / "data" / "chroma"
@@ -42,6 +46,11 @@ MEMORY_DIR           = Path(__file__).parent.parent / "data" / "memories"
 MEMORY_CHAR_LIMIT    = 2200   # max chars for agent's self-memories (MEMORY.md)
 USER_CHAR_LIMIT      = 1375   # max chars for user profile (USER.md)
 MEMORY_AUTOSAVE_INTERVAL = 3   # turns between proactive memory-save nudges
+
+# ── Obsidian Vault ─────────────────────────────────────────────────────────────
+OBSIDIAN_VAULT_PATH  = os.getenv("OBSIDIAN_VAULT_PATH", str(Path.home() / "Documents" / "Obsidian Vault"))
+OBSIDIAN_AURA_FOLDER = os.getenv("OBSIDIAN_AURA_FOLDER", "AURA")
+VAULT_SIMILARITY_THRESHOLD = 0.35
 
 # ── Voice ─────────────────────────────────────────────────────────────────────
 UI_SOCKET_PORT = 9_001

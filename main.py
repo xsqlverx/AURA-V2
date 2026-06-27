@@ -42,12 +42,11 @@ def start_backend():
 
 def wait_for_backend():
     import requests
-    from core.config import SERVER_URL
 
     logger.info("Waiting for backend...")
     for _ in range(60):
         try:
-            r = requests.get(f"{SERVER_URL}/health", timeout=1)
+            r = requests.get("http://127.0.0.1:8000/health", timeout=1)
             if r.status_code == 200:
                 logger.info("Backend ready.")
                 return True

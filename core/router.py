@@ -46,6 +46,14 @@ _TOOL_KEYWORDS = {
     "remember", "memory", "forget", "recall",
     "whatsapp", "message", "send",
     "screenshot", "screen",
+    # Vault / follow-up confirmations
+    "vault", "obsidian",
+    "yeah", "ya", "yes", "sure", "do it", "go ahead", "yep",
+    # Conversational queries — route to tool path so native func calls execute
+    "wrote about", "thing about", "my notes",
+    "what was", "what did i", "do i have",
+    "anything about", "tell me about",
+    "is there a", "find me",
 }
 
 

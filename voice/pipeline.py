@@ -415,7 +415,7 @@ def stream_to_tts(text: str, history: list, tts) -> str:
     try:
         resp = requests.post(
             f"{SERVER_URL}/chat",
-            json={"message": text, "history": past},
+            json={"message": text, "history": past, "speak": False},
             stream=True,
             timeout=120,
         )

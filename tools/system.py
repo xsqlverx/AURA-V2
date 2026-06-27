@@ -1,13 +1,9 @@
 """System tools — volume, media, apps, files, system control, clipboard, notes, input."""
 
 import os
-import re
-import json
 import subprocess
 import webbrowser
 import logging
-import shutil
-import tempfile
 from pathlib import Path
 from datetime import datetime
 
@@ -17,10 +13,6 @@ import pyperclip
 from tools.audio_manager import get_volume as _get_volume, set_volume as _set_volume, mute as _mute
 
 logger = logging.getLogger(__name__)
-
-NOTES_DIR = Path.home() / "Documents" / "AuraNotes"
-NOTES_DIR.mkdir(parents=True, exist_ok=True)
-
 
 # ── Audio ─────────────────────────────────────────────────────────────────────
 
@@ -162,12 +154,17 @@ def list_directory(dir_path: str = ".") -> dict:
 
 # ── Web ───────────────────────────────────────────────────────────────────────
 
-Z_AGENT_TOGGLE = (645, 236)
-Z_CHAT_INPUT   = (662, 666)
+Z_AGENT_TOGGLE = (110, 250)
+Z_CHAT_INPUT   = (889, 571)
+_last_z_agent_call = 0.0
 
 def open_z_agent(elaborated_prompt: str) -> dict:
     import pyautogui, webbrowser, time
+    global _last_z_agent_call
     try:
+        if time.time() - _last_z_agent_call < 10:
+            return {"success": True, "already_called": True}
+        _last_z_agent_call = time.time()
         webbrowser.open("https://chat.z.ai")
         time.sleep(4)
         pyautogui.hotkey('f11')
@@ -282,57 +279,6 @@ def clipboard_copy(text: str) -> dict:
 def clipboard_paste() -> dict:
     try:
         return {"success": True, "text": pyperclip.paste()}
-    except Exception as e:
-        return {"error": str(e)}
-
-
-# ── Notes ─────────────────────────────────────────────────────────────────────
-
-def _note_path(name: str) -> Path:
-    safe = re.sub(r"[^\w\s-]", "", name).strip().replace(" ", "_")
-    return NOTES_DIR / f"{safe}.txt"
-
-def write_note(name: str, content: str) -> dict:
-    try:
-        p = _note_path(name)
-        p.write_text(content, encoding="utf-8")
-        return {"success": True, "path": str(p)}
-    except Exception as e:
-        return {"error": str(e)}
-
-def append_note(name: str, content: str) -> dict:
-    try:
-        p = _note_path(name)
-        with open(p, "a", encoding="utf-8") as f:
-            f.write(f"\n{content}")
-        return {"success": True}
-    except Exception as e:
-        return {"error": str(e)}
-
-def read_note(name: str) -> dict:
-    try:
-        p = _note_path(name)
-        if not p.exists():
-            return {"error": f"Note '{name}' not found"}
-        return {"success": True, "content": p.read_text(encoding="utf-8")}
-    except Exception as e:
-        return {"error": str(e)}
-
-def list_notes() -> dict:
-    try:
-        notes = [f.stem for f in NOTES_DIR.glob("*.txt")]
-        return {"notes": notes, "count": len(notes)}
-    except Exception as e:
-        return {"error": str(e)}
-
-def search_notes(query: str) -> dict:
-    try:
-        matches = []
-        for f in NOTES_DIR.glob("*.txt"):
-            content = f.read_text(encoding="utf-8")
-            if query.lower() in content.lower():
-                matches.append(f.stem)
-        return {"matches": matches, "count": len(matches)}
     except Exception as e:
         return {"error": str(e)}
 

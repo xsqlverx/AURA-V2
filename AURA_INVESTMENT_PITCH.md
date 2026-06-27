@@ -53,7 +53,7 @@ Unlike cloud-dependent solutions (ChatGPT, Alexa, Google Assistant) that mine yo
 
 | Pain Point | Current Solutions | The Gap |
 |---|---|---|
-| **Privacy** | ChatGPT, Alexa, Google Assistant all send your data to the cloud | No local-first, privacy-guaranteed AI assistant exists |
+| **Privacy** | ChatGPT, Alexa, Google Assistant all send your data to the cloud | 
 | **Deep PC Integration** | Cloud assistants can't control your volume, apps, shutdown, clipboard | No AI that truly lives on and controls your machine |
 | **Memory** | Chat assistants have no persistent memory of who you are | No assistant that remembers preferences, habits, corrections across sessions |
 | **Voice Quality** | Most TTS is robotic and emotionless | No locally-run assistant with expressive, emotional speech |

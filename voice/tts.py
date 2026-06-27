@@ -79,6 +79,8 @@ class BaseTTSEngine:
                 self._audio_queue.task_done()
                 if self._audio_queue.empty():
                     self.is_speaking.clear()
+                # Natural gap between sentences to avoid robotic back-to-back delivery
+                time.sleep(0.3)
 
     def speak(self, text: str):
         if text and text.strip():

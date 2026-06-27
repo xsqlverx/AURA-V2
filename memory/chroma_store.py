@@ -12,6 +12,7 @@ from core.config import (
     MEMORY_SIMILARITY_THRESHOLD,
     MEMORY_MAX_RESULTS,
     MEMORY_DEDUP_THRESHOLD,
+    VAULT_SIMILARITY_THRESHOLD,
     UI_SOCKET_PORT,
 )
 
@@ -21,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 _embedder: Optional[SentenceTransformer] = None
 _collection = None
+_vault_collection = None
+_VAULT_COLLECTION_NAME = "aura_vault"
 
 
 def _get_embedder() -> SentenceTransformer:
@@ -36,7 +39,7 @@ def init() -> bool:
     Returns True on success, False on failure.
     Call this explicitly at startup — never at module level.
     """
-    global _collection
+    global _collection, _vault_collection
     try:
         CHROMA_PATH.mkdir(parents=True, exist_ok=True)
         client = chromadb.PersistentClient(
@@ -47,8 +50,13 @@ def init() -> bool:
             name="aura_memory",
             metadata={"hnsw:space": "cosine"},
         )
+        _vault_collection = client.get_or_create_collection(
+            name=_VAULT_COLLECTION_NAME,
+            metadata={"hnsw:space": "cosine"},
+        )
         _get_embedder()  # warm up the model now, not on first query
-        logger.info("Memory initialized. %d memories on record.", _collection.count())
+        logger.info("Memory initialized. %d memories, %d vault docs on record.",
+                     _collection.count(), _vault_collection.count())
         return True
     except Exception as e:
         logger.error("Memory init failed: %s", e)
@@ -232,6 +240,89 @@ def update_entry(id: str, new_text: str) -> bool:
 
 
 # ── TCP notification ────────────────────────────────────────────────────────
+
+# ── Vault Collection ─────────────────────────────────────────────────────────
+
+def _vault_ready() -> bool:
+    if _vault_collection is None:
+        logger.warning("Vault collection not initialized.")
+        return False
+    return True
+
+
+def index_vault_document(text: str, metadata: dict) -> bool:
+    """Index a vault document into the aura_vault collection.
+    Unconditional write (no dedup). Updates existing doc if path matches."""
+    if not _vault_ready():
+        return False
+    try:
+        embedder = _get_embedder()
+        embedding = embedder.encode(text).tolist()
+
+        import uuid, time
+        doc_id = metadata.get("path", str(uuid.uuid4()))
+        meta = {**metadata, "timestamp": time.time()}
+
+        _vault_collection.add(
+            ids=[doc_id],
+            embeddings=[embedding],
+            documents=[text],
+            metadatas=[meta],
+        )
+        logger.debug("Vault doc indexed: %s", doc_id)
+        return True
+    except Exception as e:
+        logger.error("Vault index failed: %s", e)
+        return False
+
+
+def search_vault(query: str, max_results: int = 5) -> list[dict]:
+    """Semantic search across indexed vault documents.
+    Returns [{path, text, similarity, metadata}, ...]."""
+    if not _vault_ready() or _vault_collection.count() == 0:
+        return []
+    try:
+        embedder = _get_embedder()
+        embedding = embedder.encode(query).tolist()
+        n = min(max_results, _vault_collection.count())
+        results = _vault_collection.query(
+            query_embeddings=[embedding],
+            n_results=n,
+            include=["documents", "metadatas", "distances"],
+        )
+        entries = []
+        for id_, doc, metadata, distance in zip(
+            results["ids"][0],
+            results["documents"][0],
+            results["metadatas"][0],
+            results["distances"][0],
+        ):
+            similarity = 1 - distance
+            if similarity < VAULT_SIMILARITY_THRESHOLD:
+                continue
+            entries.append({
+                "path": id_,
+                "text": doc[:500],
+                "metadata": metadata,
+                "similarity": round(similarity, 4),
+            })
+        return entries
+    except Exception as e:
+        logger.error("Vault search failed: %s", e)
+        return []
+
+
+def delete_vault_document(path: str) -> bool:
+    """Remove a vault document from the index by its relative path (used as ID)."""
+    if not _vault_ready():
+        return False
+    try:
+        _vault_collection.delete(ids=[path])
+        logger.debug("Vault doc deleted from index: %s", path)
+        return True
+    except Exception:
+        return False
+
 
 def _send_tcp_notification(ids: list[str]) -> None:
     """Fire-and-forget MEMORY_ACCESS message to socket bridge on port 9001.

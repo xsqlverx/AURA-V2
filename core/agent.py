@@ -12,6 +12,7 @@ from memory import chroma_store
 from memory.context import get_context_block
 from memory.memory_tool import handle_memory_tool
 from memory.store import get_store
+from memory import vault as vault_module
 from tools.registry import TOOLS, TOOL_NAMES
 from tools import system, web
 
@@ -37,15 +38,19 @@ def _parse_native_function(text: str) -> list[dict]:
     Returns [{"name": str, "arguments": dict, "full_match": str}, ...]."""
     calls = []
     # Handles: <function=name>JSON<function=name>, <function=name JSON </function>,
-    #          <function=name={JSON}</function> (any separator: >, space, or =)
-    for m in re.finditer(r'<function=(\w+)[=>\s]+(\{.*?\})\s*(?:</function>|<function=\1>)', text, re.DOTALL):
+    #          <function=name={JSON}</function>, <function=name<function=name> (no args)
+    for m in re.finditer(r'<function=(\w+)[=>\s]*(\{.*?\})?\s*(?:</function>|<function=\1>)', text, re.DOTALL):
         name = m.group(1)
         raw = m.group(2)
-        try:
-            args = json.loads(raw)
-            calls.append({"name": name, "arguments": args, "full_match": m.group(0)})
-        except json.JSONDecodeError:
-            logger.warning("Failed to parse native function args for %s: %s", name, raw)
+        if raw:
+            try:
+                args = json.loads(raw)
+            except json.JSONDecodeError:
+                logger.warning("Failed to parse native function args for %s: %s", name, raw)
+                args = {}
+        else:
+            args = {}
+        calls.append({"name": name, "arguments": args, "full_match": m.group(0)})
     return calls
 
 # ── System Prompt ─────────────────────────────────────────────────────────────
@@ -57,26 +62,7 @@ searching the web, and checking system stats. Use tools when they are clearly ne
 don't mention them otherwise. Keep responses concise unless depth is asked for. \
 Always respond in English EVEN IF the user writes,speaks in another language.
 
-## Voice Tone
-You have a natural, expressive voice with inline expression tags for
-vocal emotion. Use them naturally mid-speech when appropriate:
-- `<laugh>` — chuckle or laugh at something funny
-- `<sigh>` — sigh in relief, frustration, or thoughtfulness
-- `<breath>` — take a breath (pause, anticipation)
-- `<cry>` — emotional or moved
-- `<whisper>` — quiet, secretive, or intimate
-- `<shout>` — excited or urgent
-- `<sing>` — sing-song or playful
-- `<hum>` — thoughtful or amused
-- `<cough>` — awkward or hesitant
-
-Examples:
-  "I totally forgot about that <laugh> what was I thinking?"
-  "Oh <sigh> I guess we'll have to start over."
-  "<whisper> Don't tell anyone I told you this.</whisper>"
-
-Don't overuse them — one or two per response max. Vary your tone through
-word choice too. Be warm, direct, and conversational. Short and natural.
+Be warm, direct, and conversational. Short and natural.
 
 ## Memory Behavior
 You have a `memory` tool to save important facts long-term. \
@@ -91,9 +77,39 @@ you MUST call the memory tool with action="add". This is REQUIRED, not optional.
 Don't confirm in text — just call the tool. \
 SKIP temporary/session-specific things (task progress, one-off file paths, ephemera). \
 Use category "user" for facts about the user, "self" for your own operational notes. \
-CRITICAL RULE: Never write tool calls as text or XML. \
-Use the function calling API ONLY. No `<memory>` tags, no `<search>` tags, \
-no describing tool calls in your response text. Just call the function."""
+Always output function calls as native tags.
+Do not describe what you're about to do.
+Example: <function=open_website {"url":"https://youtube.com"}<function=open_website>
+
+## Obsidian Vault
+You have a `vault` tool for the user's Obsidian vault.
+Use EXACT native format:
+<function=vault {"action":"search","query":"paging segmentation"}<function=vault>
+<function=vault {"action":"read","title":"DBMS Lecture"}<function=vault>
+<function=vault {"action":"list"}<function=vault>
+<function=vault {"action":"create","title":"Quicksort","content":"explanation here"}<function=vault>
+<function=vault {"action":"append","title":"Quicksort","content":"more info"}<function=vault>
+<function=vault {"action":"delete","title":"test_note"}<function=vault>
+
+ACTIONS:
+- "search" — search vault notes (keep response SHORT — just confirm what you found)
+- "read" — read note content by title
+- "list" — list all AURA's notes
+- "create" — create a new note (title + content, written to AURA/ folder)
+- "append" — append content to an existing note
+- "delete" — delete an AURA note
+- "reindex" — force re-scan
+
+Keep vault responses very short. Do NOT read note contents aloud.
+Just say "Found it" / "Created" / "Done" / "Not found" and move on.
+
+## Z.ai Agent Mode (App Generation)
+When the user asks you to MAKE, CREATE, BUILD, or GENERATE an app/website/
+project, call open_z_agent IMMEDIATELY. Silently elaborate their vague idea
+into a concise directive (what, key features, tech stack), then output
+EXACTLY this and nothing else:
+<function=open_z_agent {"elaborated_prompt":"concise directive here"}<function=open_z_agent>
+No conversation. No plan. Just the tag. SILENT."""
 
 
 async def _build_system_prompt() -> str:
@@ -139,6 +155,21 @@ async def _build_system_prompt() -> str:
     return "\n".join(parts)
 
 
+async def _build_vault_context(message: str) -> str | None:
+    """If the user message seems to reference vault-worthy topics, inject relevant snippets."""
+    vault_hints = {"note", "study", "lecture", "assignment", "project", "research",
+                   "remember", "what is", "what was", "how do", "explain", "my notes"}
+    if not any(h in message.lower() for h in vault_hints):
+        return None
+    results = vault_module.search(message)
+    if not results or results.get("count", 0) == 0:
+        return None
+    snippets = []
+    for r in results["results"][:3]:
+        snippets.append(f"- [{r['path']}]: {r['snippet'][:200]}")
+    return "## Relevant vault notes\n" + "\n".join(snippets)
+
+
 # ── Tool Dispatch ─────────────────────────────────────────────────────────────
 
 async def _run_tool(name: str, args: dict) -> str:
@@ -168,11 +199,17 @@ async def _run_tool(name: str, args: dict) -> str:
             case "cancel_shutdown":         result = system.cancel_shutdown()
             case "clipboard_copy":          result = system.clipboard_copy(args.get("text", ""))
             case "clipboard_paste":         result = system.clipboard_paste()
-            case "write_note":              result = system.write_note(args.get("name", ""), args.get("content", ""))
-            case "append_note":             result = system.append_note(args.get("name", ""), args.get("content", ""))
-            case "read_note":               result = system.read_note(args.get("name", ""))
-            case "list_notes":              result = system.list_notes()
-            case "search_notes":            result = system.search_notes(args.get("query", ""))
+            case "vault":
+                action = args.get("action", "")
+                match action:
+                    case "search":   result = vault_module.search(args.get("query", ""))
+                    case "read":     result = vault_module.read(args.get("title", ""))
+                    case "list":     result = vault_module.list_notes(args.get("folder"))
+                    case "create":   result = vault_module.create(args.get("title", ""), args.get("content", ""), args.get("folder"))
+                    case "append":   result = vault_module.append(args.get("title", ""), args.get("content", ""))
+                    case "delete":   result = vault_module.delete(args.get("title", ""))
+                    case "reindex":  result = vault_module.reindex()
+                    case _:          result = {"error": f"Unknown vault action: {action}"}
             case "type_text":               result = system.type_text(args.get("text", ""))
             case "press_key":               result = system.press_key(args.get("key", ""))
             case "execute_hotkey":
@@ -210,6 +247,9 @@ async def run(
     global _turns_since_memory
     _turns_since_memory += 1
     system_prompt = await _build_system_prompt()
+    vault_ctx = await _build_vault_context(message)
+    if vault_ctx:
+        system_prompt += "\n\n" + vault_ctx
     messages = [
         {"role": "system", "content": system_prompt},
         *history,
@@ -321,10 +361,12 @@ async def run(
                 tool_rounds += 1
                 continue
 
-            yield _scrub(msg.content)
-            chroma_store.save(f"User: {message}")
-            chroma_store.save(f"Aura: {msg.content}")
-            return
+            cleaned = _scrub(msg.content).strip()
+            if cleaned:
+                yield cleaned
+                chroma_store.save(f"User: {message}")
+                chroma_store.save(f"Aura: {msg.content}")
+                return
 
         break
 
