@@ -223,10 +223,9 @@ def update_entry(id: str, new_text: str) -> bool:
             return False
         old_metadata = existing["metadatas"][0] if existing["metadatas"] else {}
 
-        _collection.delete(ids=[id])
         embedder = _get_embedder()
         new_embedding = embedder.encode(new_text).tolist()
-        _collection.add(
+        _collection.update(
             ids=[id],
             embeddings=[new_embedding],
             documents=[new_text],

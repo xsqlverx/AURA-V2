@@ -128,6 +128,8 @@ class MemoryStore:
 
     # ── Internal: file I/O ────────────────────────────────────────────────
 
+    SEPARATOR = "\u00a7"
+
     def _parse_file(self, path: Path) -> list[str]:
         if not path.exists():
             return []
@@ -142,7 +144,7 @@ class MemoryStore:
             except Exception:
                 logger.warning("Could not back up corrupted %s", path.name)
             return []
-        parts = [p.strip() for p in raw.split("\u00a7")]
+        parts = [p.strip() for p in raw.split(self.SEPARATOR)]
         return [p for p in parts if p]
 
     def _save_category(self, category: str) -> None:
@@ -177,7 +179,8 @@ class MemoryStore:
             self._disk_hashes[name] = h
 
     def _atomic_write(self, path: Path, entries: list[str]) -> None:
-        content = "\n".join(f"\u00a7 {e}" for e in entries)
+        sep = self.SEPARATOR
+        content = "\n".join(f"{sep} {e}" for e in entries)
         if entries:
             content += "\n"
         fd, tmp = tempfile.mkstemp(dir=self._memory_dir, suffix=".tmp")

@@ -7,6 +7,7 @@ send_media_command() delegates to tools.system (pyautogui keyboard shortcuts).
 """
 
 import logging
+import threading
 import time
 
 import psutil
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 # Cache last known track so paused apps still show metadata
 _last_track: dict | None = None
 _last_track_time: float = 0.0
+_last_track_lock = threading.Lock()
 _CACHE_TTL = 60  # seconds — if no window found, return cached data as paused
 
 # ── Window title detection via ctypes ─────────────────────────────────────────
@@ -115,12 +117,14 @@ def get_now_playing() -> dict:
     cb = _WNDENUMPROC(_enum_proc)
     _user32.EnumWindows(cb, 0)
 
+    now = time.time()
+
     if not candidates:
-        now = time.time()
-        if _last_track and (now - _last_track_time) < _CACHE_TTL:
-            cached = dict(_last_track)
-            cached["is_playing"] = False
-            return cached
+        with _last_track_lock:
+            if _last_track and (now - _last_track_time) < _CACHE_TTL:
+                cached = dict(_last_track)
+                cached["is_playing"] = False
+                return cached
         return {"error": "No active media player window detected"}
 
     best = candidates[0]
@@ -130,22 +134,17 @@ def get_now_playing() -> dict:
 
     # Try to parse "Song - Artist" or "Artist - Song" from window title
     if " - " in title:
-        # Rip off known suffixes like " - Spotify", " - VLC", etc.
         app_name = _KNOWN_PLAYERS.get(best["proc_name"], "")
         suffix = f" - {app_name}"
         clean_title = title[: -len(suffix)] if title.endswith(suffix) else title
 
-        # Try right-split (Song - Artist) first
         parts = clean_title.rsplit(" - ", 1)
         if len(parts) == 2:
             maybe_artist = parts[1].strip()
             maybe_title = parts[0].strip()
-            # Avoid false positives from URLs or generic suffixes
             if not maybe_artist.startswith(("http", "www", "//")) and not app_name.lower() in maybe_artist.lower():
                 title = maybe_title
                 artist = maybe_artist
-                # If the "artist" is longer than the "title", format may be Artist - Song
-                # (common on YouTube Music). Swap using left-split instead.
                 if len(maybe_artist) > len(maybe_title):
                     parts2 = clean_title.split(" - ", 1)
                     if len(parts2) == 2:
@@ -161,8 +160,9 @@ def get_now_playing() -> dict:
         "source_app": _KNOWN_PLAYERS.get(best["proc_name"], best["proc_name"]),
     }
 
-    _last_track = result
-    _last_track_time = time.time()
+    with _last_track_lock:
+        _last_track = result
+        _last_track_time = now
 
     return result
 

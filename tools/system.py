@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+import threading
 import webbrowser
 import logging
 from pathlib import Path
@@ -92,7 +93,7 @@ def launch_app(app_name: str) -> dict:
         if exe.endswith(":") or exe.startswith("http"):
             os.startfile(exe)
         else:
-            subprocess.Popen(exe, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen([exe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         logger.info("Launched: %s", exe)
         return {"success": True, "launched": exe}
     except Exception as e:
@@ -157,14 +158,16 @@ def list_directory(dir_path: str = ".") -> dict:
 Z_AGENT_TOGGLE = (110, 250)
 Z_CHAT_INPUT   = (889, 571)
 _last_z_agent_call = 0.0
+_z_lock = threading.Lock()
 
 def open_z_agent(elaborated_prompt: str) -> dict:
     import pyautogui, webbrowser, time
     global _last_z_agent_call
     try:
-        if time.time() - _last_z_agent_call < 10:
-            return {"success": True, "already_called": True}
-        _last_z_agent_call = time.time()
+        with _z_lock:
+            if time.time() - _last_z_agent_call < 10:
+                return {"success": True, "already_called": True}
+            _last_z_agent_call = time.time()
         webbrowser.open("https://chat.z.ai")
         time.sleep(4)
         pyautogui.hotkey('f11')
@@ -194,35 +197,35 @@ def open_website(url: str) -> dict:
 
 def shutdown(delay_seconds: int = 20) -> dict:
     try:
-        subprocess.Popen(f"shutdown /s /t {delay_seconds}", shell=True)
+        subprocess.Popen(["shutdown", "/s", "/t", str(delay_seconds)])
         return {"success": True, "message": f"Shutting down in {delay_seconds}s"}
     except Exception as e:
         return {"error": str(e)}
 
 def restart(delay_seconds: int = 30) -> dict:
     try:
-        subprocess.Popen(f"shutdown /r /t {delay_seconds}", shell=True)
+        subprocess.Popen(["shutdown", "/r", "/t", str(delay_seconds)])
         return {"success": True, "message": f"Restarting in {delay_seconds}s"}
     except Exception as e:
         return {"error": str(e)}
 
 def sleep_pc() -> dict:
     try:
-        subprocess.Popen("rundll32.exe powrprof.dll,SetSuspendState 0,1,0", shell=True)
+        subprocess.Popen(["rundll32.exe", "powrprof.dll", "SetSuspendState", "0", "1", "0"])
         return {"success": True}
     except Exception as e:
         return {"error": str(e)}
 
 def lock_pc() -> dict:
     try:
-        subprocess.Popen("rundll32.exe user32.dll,LockWorkStation", shell=True)
+        subprocess.Popen(["rundll32.exe", "user32.dll", "LockWorkStation"])
         return {"success": True}
     except Exception as e:
         return {"error": str(e)}
 
 def cancel_shutdown() -> dict:
     try:
-        subprocess.Popen("shutdown /a", shell=True)
+        subprocess.Popen(["shutdown", "/a"])
         return {"success": True}
     except Exception as e:
         return {"error": str(e)}

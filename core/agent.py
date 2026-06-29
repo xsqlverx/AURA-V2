@@ -3,6 +3,8 @@
 import json
 import logging
 import re
+import threading
+import uuid
 from pathlib import Path
 from typing import AsyncIterator
 
@@ -21,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 MAX_TOOL_ROUNDS = 3
 _turns_since_memory = 0
+_turns_lock = threading.Lock()
 
 
 def _scrub(text: str) -> str:
@@ -158,7 +161,11 @@ async def _build_system_prompt() -> str:
         pass
 
     global _turns_since_memory
-    if _turns_since_memory >= MEMORY_AUTOSAVE_INTERVAL:
+    should_nudge = False
+    with _turns_lock:
+        if _turns_since_memory >= MEMORY_AUTOSAVE_INTERVAL:
+            should_nudge = True
+    if should_nudge:
         parts.append(
             "\n(Note: Consider using the `memory` tool if you've learned something new about the user.)"
         )
@@ -232,7 +239,8 @@ async def _run_tool(name: str, args: dict) -> str:
                 result = send_whatsapp(contact, args.get("message", ""))
             case "memory":
                 global _turns_since_memory
-                _turns_since_memory = 0
+                with _turns_lock:
+                    _turns_since_memory = 0
                 result = handle_memory_tool(
                     action=args.get("action", ""),
                     category=args.get("category", "user"),
@@ -261,7 +269,8 @@ async def run(
     mode: str = "deep",
 ) -> AsyncIterator[str]:
     global _turns_since_memory
-    _turns_since_memory += 1
+    with _turns_lock:
+        _turns_since_memory += 1
     system_prompt = await _build_system_prompt()
     vault_ctx = await _build_vault_context(message)
     if vault_ctx:
@@ -331,31 +340,13 @@ async def run(
 
         msg = response.choices[0].message
 
-        # ── Tool calls returned — execute them ────────────────────────────────
-        if msg.tool_calls:
-            messages.append(msg)
-            for tc in msg.tool_calls:
-                name = tc.function.name
-                args = json.loads(tc.function.arguments)
-                logger.info("Tool call: %s(%s)", name, args)
-                result = await _run_tool(name, args)
-                logger.info("Tool result: %s", result)
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": result,
-                })
-            tool_rounds += 1
-            continue
-
-        # ── No tool calls — model gave a direct answer ────────────────────────
+        # ── Process native <function=name> tags ────────────────────────────────
         # Check for Llama-native <function=name> format first
         if msg.content:
             native_calls = _parse_native_function(msg.content)
             if native_calls:
                 cleaned = msg.content
                 tool_calls = []
-                import uuid
                 for nc in native_calls:
                     cleaned = cleaned.replace(nc["full_match"], "")
                     tc_id = f"call_{uuid.uuid4().hex[:12]}"

@@ -36,8 +36,8 @@ async def _fetch_weather() -> Optional[dict]:
             city = area.get("areaName", [{}])[0].get("value", "")
             region = area.get("region", [{}])[0].get("value", "")
             return {
-                "city": "Aluva",
-                "region": "Kerala",
+                "city": city,
+                "region": region,
                 "temp": f"{temp}°C" if temp else "",
                 "condition": desc,
             }

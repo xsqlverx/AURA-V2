@@ -280,6 +280,8 @@ def _handle_end_session(tts) -> None:
 
 # ── Voice switch (keyword + Groq LLM double-check) ────────────────────────────
 
+_groq_client = None
+
 def _llm_confirm_voice_intent(user_text: str) -> dict:
     """Cheap Groq call that classifies the spoken text as a voice-switch
     request. Returns one of:
@@ -295,6 +297,10 @@ def _llm_confirm_voice_intent(user_text: str) -> dict:
     from groq import Groq
     from core.config import GROQ_API_KEY
 
+    global _groq_client
+    if _groq_client is None:
+        _groq_client = Groq(api_key=GROQ_API_KEY)
+
     system = (
         "You classify short voice-pipeline commands about TTS voices. "
         "Respond with ONLY a JSON object with key 'intent': "
@@ -306,7 +312,7 @@ def _llm_confirm_voice_intent(user_text: str) -> dict:
         '{"intent":"none"}'
     )
     try:
-        client = Groq(api_key=GROQ_API_KEY)
+        client = _groq_client
         completion = client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[
@@ -381,7 +387,7 @@ def _handle_voice_switch(tts, user_text: str) -> None:
         )
         return
 
-    if decision["intent"] == "current" or asks_current and not asks_switch and not asks_to_list:
+    if decision["intent"] == "current" or (asks_current and not asks_switch and not asks_to_list):
         tts.speak(f"I'm currently using voice {tts.get_current_voice()}.")
         return
 
@@ -430,7 +436,7 @@ def stream_to_tts(text: str, history: list, tts) -> str:
     clause_break = re.compile(r"(?<=[,;:])\s+")
 
     for chunk in resp.iter_content(chunk_size=None, decode_unicode=True):
-        if not chunk or chunk.startswith("[AURA_"):
+        if not chunk:
             continue
         buffer += chunk
 

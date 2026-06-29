@@ -1,6 +1,7 @@
 """All environment variables and constants. Single source of truth for the entire app."""
 
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -55,7 +56,7 @@ VAULT_SIMILARITY_THRESHOLD = 0.35
 # ── Voice ─────────────────────────────────────────────────────────────────────
 UI_SOCKET_PORT = 9_001
 
-# TTS provider: "edge" (primary, cloud) or "kokoro" (fallback, local).
+# TTS provider: "supertonic", "edge", or "kokoro".
 TTS_PROVIDER = os.getenv("TTS_PROVIDER", "edge")
 
 # Edge / Kokoro voice name (default: en-US-AvaNeural for Edge, af_bella for Kokoro)

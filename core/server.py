@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -74,24 +74,27 @@ ws_manager = _WSManager()
 
 def _start_socket_bridge() -> None:
     def _run():
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
-            srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            srv.settimeout(1.0)
-            srv.bind(("127.0.0.1", UI_SOCKET_PORT))
-            srv.listen(5)
-            logger.info("Socket bridge listening on port %d", UI_SOCKET_PORT)
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
+                srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                srv.settimeout(1.0)
+                srv.bind(("127.0.0.1", UI_SOCKET_PORT))
+                srv.listen(5)
+                logger.info("Socket bridge listening on port %d", UI_SOCKET_PORT)
 
-            while True:
-                try:
-                    conn, _ = srv.accept()
-                    with conn:
-                        data = conn.recv(4096).decode("utf-8").strip()
-                        if data:
-                            ws_manager.broadcast_sync(data)
-                except socket.timeout:
-                    continue
-                except Exception as e:
-                    logger.warning("Socket bridge error: %s", e)
+                while True:
+                    try:
+                        conn, _ = srv.accept()
+                        with conn:
+                            data = conn.recv(4096).decode("utf-8").strip()
+                            if data:
+                                ws_manager.broadcast_sync(data)
+                    except socket.timeout:
+                        continue
+                    except Exception as e:
+                        logger.warning("Socket bridge error: %s", e)
+        except OSError as e:
+            logger.error("Socket bridge failed to bind on port %d: %s", UI_SOCKET_PORT, e)
 
     t = threading.Thread(target=_run, daemon=True)
     t.start()
@@ -906,7 +909,8 @@ async def _gather_briefing_data() -> dict:
 
     async def _get_vault_notes():
         from memory.vault import list_notes
-        return list_notes()
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, list_notes)
 
     news_task = asyncio.create_task(get_news_headlines(5))
     stats_task = asyncio.create_task(_get_stats())
