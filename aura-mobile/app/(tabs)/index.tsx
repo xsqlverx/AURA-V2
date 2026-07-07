@@ -1,317 +1,251 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
-  View, Text, TextInput, FlatList, Pressable,
-  StyleSheet, SafeAreaView, KeyboardAvoidingView, Platform, Alert,
+  View, Text, Pressable, StyleSheet, SafeAreaView, ScrollView, Platform,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import {
-  requestRecordingPermissionsAsync,
-  setAudioModeAsync,
-  RecordingPresets,
-  AudioModule,
-} from 'expo-audio';
-import type { AudioRecorder } from 'expo-audio';
-import Animated, { FadeInDown } from 'react-native-reanimated';
-import { chat as sendChat, uploadAudio } from '../../src/api/aura';
-import { useSettings } from '../../src/stores/settingsStore';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter, useNavigation } from 'expo-router';
+import { getHealth, getStats, getWeather, triggerBriefing } from '../../src/api/aura';
 import { useWs } from '../../src/stores/wsStore';
-import { colors } from '../../src/theme';
-import Orb from '../../src/components/Orb';
+import { useSettings } from '../../src/stores/settingsStore';
+import { colors, spacing, radius, typography } from '../../src/theme';
+import GlassCard from '../../src/components/GlassCard';
+import Icon from '../../src/components/Icon';
 
-type Message = {
-  id: string;
-  role: 'user' | 'aura';
-  content: string;
-  timestamp: number;
-};
-
-export default function ChatScreen() {
-  const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [streamingId, setStreamingId] = useState<string | null>(null);
-  const [recorder, setRecorder] = useState<AudioRecorder | null>(null);
-  const [isRecording, setIsRecording] = useState(false);
-  const flatListRef = useRef<FlatList>(null);
+export default function HomeScreen() {
   const router = useRouter();
-  const isLoaded = useSettings((s) => s.isLoaded);
+  const navigation = useNavigation();
   const wsState = useWs((s) => s.state);
   const wsConnected = useWs((s) => s.connected);
+  const backendUrl = useSettings((s) => s.backendUrl);
+  const [stats, setStats] = useState<any>(null);
+  const [weather, setWeather] = useState<any>(null);
 
-  const isOrbActive = loading || wsState === 'thinking' || wsState === 'speaking' || wsState === 'listening';
+  useEffect(() => {
+    getStats().then(setStats).catch(() => {});
+    getWeather().then(setWeather).catch(() => {});
+  }, []);
 
-  const sendMessage = useCallback(async () => {
-    const text = input.trim();
-    if (!text || loading) return;
-
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: text,
-      timestamp: Date.now(),
-    };
-    const auraMsg: Message = {
-      id: (Date.now() + 1).toString(),
-      role: 'aura',
-      content: '',
-      timestamp: Date.now(),
-    };
-
-    setMessages((prev) => [...prev, userMsg, auraMsg]);
-    setInput('');
-    setLoading(true);
-    setStreamingId(auraMsg.id);
-
-    try {
-      const history = messages
-        .filter((m) => m.content)
-        .slice(-10)
-        .map((m) => ({
-          role: m.role === 'aura' ? 'assistant' : 'user',
-          content: m.content,
-        }));
-
-      await sendChat(text, history, 'deep', (chunk) => {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === auraMsg.id ? { ...m, content: m.content + chunk } : m
-          )
-        );
-      });
-    } catch (e: any) {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === auraMsg.id
-            ? { ...m, content: `Error: ${e.message}` }
-            : m
-        )
-      );
-    } finally {
-      setLoading(false);
-      setStreamingId(null);
-    }
-  }, [input, loading, messages]);
-
-  // ── Voice Recording ────────────────────────────────────────────────
-
-  const startRecording = async () => {
-    try {
-      await requestRecordingPermissionsAsync();
-      await setAudioModeAsync({
-        allowsRecording: true,
-        playsInSilentMode: true,
-      });
-      const r = new AudioModule.AudioRecorder(RecordingPresets.HIGH_QUALITY);
-      await r.prepareToRecordAsync();
-      r.record();
-      setRecorder(r);
-      setIsRecording(true);
-    } catch (e: any) {
-      Alert.alert('Error', `Could not start recording: ${e.message}`);
-    }
-  };
-
-  const stopRecording = async () => {
-    if (!recorder) return;
-    setIsRecording(false);
-    try {
-      await recorder.stop();
-      const uri = recorder.uri;
-      setRecorder(null);
-      if (!uri) return;
-
-      const text = await uploadAudio(uri);
-      if (text) {
-        setInput((prev) => (prev ? prev + ' ' + text : text));
-      } else {
-        Alert.alert('No speech detected', 'Could not transcribe audio');
-      }
-    } catch (e: any) {
-      setRecorder(null);
-      Alert.alert('Error', `Transcription failed: ${e.message}`);
-    }
-  };
-
-  const formatTime = (ts: number) => {
-    const d = new Date(ts);
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
-
-  const renderMessage = ({ item, index }: { item: Message; index: number }) => {
-    const isUser = item.role === 'user';
-    const isStreaming = item.id === streamingId;
-    return (
-      <Animated.View
-        entering={FadeInDown.duration(200)}
-        style={[styles.bubble, isUser ? styles.userBubble : styles.auraBubble]}
-      >
-        {!isUser && <Text style={styles.auraLabel}>Aura</Text>}
-        <Text style={isUser ? styles.userText : styles.auraText}>
-          {item.content || (isStreaming ? '...' : '')}
-        </Text>
-        <Text style={styles.timestamp}>{formatTime(item.timestamp)}</Text>
-      </Animated.View>
-    );
+  const stateColors: Record<string, string> = {
+    idle: colors.tertiary,
+    listening: colors.primary,
+    thinking: colors.warning,
+    speaking: colors.secondary,
+    disconnected: colors.error,
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <View style={[styles.wsDot, wsConnected ? styles.wsOn : styles.wsOff]} />
-          <Text style={styles.headerTitle}>Aura</Text>
+          <Pressable onPress={() => (navigation as any).toggleDrawer()} style={styles.menuBtn}>
+            <Icon name="menu" size={20} color={colors.onSurface} />
+          </Pressable>
+          <View style={styles.logoWrap}>
+            <Icon name="psychology" size={22} color={colors.primary} />
+          </View>
+          <View>
+            <Text style={styles.headerTitle}>AURA</Text>
+            <Text style={styles.headerSub}>Neural Interface</Text>
+          </View>
         </View>
-        <Pressable onPress={() => router.push('/settings')} style={styles.settingsBtn}>
-          <Text style={{ color: colors.accentCyan, fontSize: 20 }}>⚙</Text>
-        </Pressable>
+        <View style={[styles.statusPill, { backgroundColor: wsConnected ? 'rgba(63,185,80,0.08)' : 'rgba(255,69,58,0.08)' }]}>
+          <View style={[styles.statusDot, { backgroundColor: wsConnected ? colors.tertiary : colors.error }]} />
+          <Text style={[styles.statusText, { color: wsConnected ? colors.tertiary : colors.error }]}>{wsConnected ? 'ONLINE' : 'OFFLINE'}</Text>
+        </View>
       </View>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <FlatList
-          ref={flatListRef}
-          data={messages}
-          keyExtractor={(item) => item.id}
-          renderItem={renderMessage}
-          contentContainerStyle={styles.list}
-          onContentSizeChange={() => flatListRef.current?.scrollToEnd()}
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Orb active={isOrbActive} size={100} />
-              <Text style={styles.emptyTitle}>Aura</Text>
-              <Text style={styles.emptySubtext}>
-                {!wsConnected
-                  ? 'Disconnected'
-                  : isLoaded
-                    ? 'Tap the mic or type a message'
-                    : 'Loading...'}
-              </Text>
-              <Text style={styles.wsLabel}>
-                {isRecording ? 'Recording...'
-                  : wsState === 'speaking' ? 'Speaking...'
-                    : wsState === 'thinking' ? 'Thinking...'
-                      : wsState === 'listening' ? 'Listening...'
-                        : wsConnected ? 'Online' : 'Offline'}
-              </Text>
+
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <GlassCard glow="cyan" style={styles.heroCard}>
+          <View style={styles.heroContent}>
+            <View style={styles.heroRow}>
+              <View style={styles.heroStat}>
+                <Text style={styles.heroLabel}>STATE</Text>
+                <Text style={[styles.heroValue, { color: stateColors[wsState] || colors.onSurface }]}>
+                  {wsState.toUpperCase()}
+                </Text>
+              </View>
+              <View style={styles.heroDivider} />
+              <View style={styles.heroStat}>
+                <Text style={styles.heroLabel}>BACKEND</Text>
+                <Text style={[styles.heroValue, { color: wsConnected ? colors.tertiary : colors.error }]}>
+                  {wsConnected ? 'ACTIVE' : 'DOWN'}
+                </Text>
+              </View>
             </View>
-          }
-        />
-        <View style={styles.inputRow}>
-          <TextInput
-            style={styles.input}
-            placeholder="Message Aura..."
-            placeholderTextColor="#484F58"
-            value={input}
-            onChangeText={setInput}
-            multiline
-            editable={!loading}
-          />
-          <Pressable
-            style={({ pressed }) => [
-              styles.sendBtn,
-              pressed && { opacity: 0.7 },
-              (!input.trim() || loading) && styles.sendBtnDisabled,
-            ]}
-            onPress={sendMessage}
-            disabled={!input.trim() || loading}
-          >
-            <Text style={styles.sendArrow}>↑</Text>
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => [
-              styles.micBtn,
-              isRecording && styles.micBtnActive,
-              pressed && { opacity: 0.7 },
-            ]}
-            onPressIn={startRecording}
-            onPressOut={stopRecording}
-          >
-            <Text style={styles.micIcon}>{isRecording ? '⏹' : '🎤'}</Text>
-          </Pressable>
+          </View>
+        </GlassCard>
+
+        {stats && (
+          <View style={styles.statsRow}>
+            {stats.cpu_percent != null && (
+              <GlassCard style={{ flex: 1 }}>
+                <View style={styles.statHeader}>
+                  <Icon name="memory" size={16} color={colors.primary} />
+                  <Text style={styles.statLabel}>CPU</Text>
+                </View>
+                <Text style={[styles.statValue, { color: (stats.cpu_percent || 0) > 80 ? colors.error : colors.primary }]}>
+                  {stats.cpu_percent}%
+                </Text>
+                <View style={styles.miniBar}>
+                  <LinearGradient
+                    colors={[colors.secondary, colors.primary]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={[styles.miniBarFill, { width: `${Math.min(stats.cpu_percent || 0, 100)}%` }]}
+                  />
+                </View>
+              </GlassCard>
+            )}
+            {stats.ram_percent != null && (
+              <GlassCard style={{ flex: 1 }}>
+                <View style={styles.statHeader}>
+                  <Icon name="storage" size={16} color={colors.secondary} />
+                  <Text style={styles.statLabel}>RAM</Text>
+                </View>
+                <Text style={[styles.statValue, { color: (stats.ram_percent || 0) > 80 ? colors.error : colors.secondary }]}>
+                  {stats.ram_percent}%
+                </Text>
+                <View style={styles.miniBar}>
+                  <LinearGradient
+                    colors={[colors.secondary, colors.primary]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={[styles.miniBarFill, { width: `${Math.min(stats.ram_percent || 0, 100)}%` }]}
+                  />
+                </View>
+              </GlassCard>
+            )}
+            {stats.battery_percent != null && (
+              <GlassCard style={{ flex: 1 }}>
+                <View style={styles.statHeader}>
+                  <Icon name="battery-full" size={16} color={colors.tertiary} />
+                  <Text style={styles.statLabel}>BATT</Text>
+                </View>
+                <Text style={[styles.statValue, { color: (stats.battery_percent || 0) < 20 ? colors.error : colors.tertiary }]}>
+                  {stats.battery_percent}%
+                </Text>
+                <View style={styles.miniBar}>
+                  <LinearGradient
+                    colors={[colors.secondary, colors.primary]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={[styles.miniBarFill, { width: `${Math.min(stats.battery_percent || 0, 100)}%` }]}
+                  />
+                </View>
+              </GlassCard>
+            )}
+          </View>
+        )}
+
+        <Text style={styles.sectionLabel}>QUICK ACCESS</Text>
+        <View style={styles.navGrid}>
+          <NavTile icon="chat-bubble-outline" label="Chat" color={colors.primary} onPress={() => router.push('/(tabs)/chat')} />
+          <NavTile icon="bolt" label="Actions" color={colors.warning} onPress={() => router.push('/(tabs)/actions')} />
+          <NavTile icon="psychology" label="Memory" color={colors.secondary} onPress={() => router.push('/(tabs)/memory')} />
+          <NavTile icon="monitor-heart" label="Stats" color={colors.tertiary} onPress={() => router.push('/(tabs)/stats')} />
+          <NavTile icon="edit-note" label="Notes" color="#F778BA" onPress={() => router.push('/(tabs)/notes')} />
+          <NavTile icon="developer-board" label="Procs" color={colors.error} onPress={() => router.push('/(tabs)/processes')} />
+          <NavTile icon="settings" label="Settings" color={colors.onSurfaceSecondary} onPress={() => router.push('/(tabs)/settings')} />
         </View>
-      </KeyboardAvoidingView>
+
+        {weather && (
+          <GlassCard glow="cyan">
+            <View style={styles.weatherCard}>
+              <View>
+                <Text style={styles.weatherTemp}>
+                  {typeof weather.temp === 'number' ? `${Math.round(weather.temp)}°` : weather.temp || ''}
+                </Text>
+                <Text style={styles.weatherDesc}>{weather.description || weather.weather || ''}</Text>
+              </View>
+              <Icon name="wb-sunny" size={32} color={colors.warning} />
+            </View>
+          </GlassCard>
+        )}
+
+        <View style={{ height: 24 }} />
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
+function NavTile({ icon, label, color, onPress }: {
+  icon: string; label: string; color: string; onPress: () => void;
+}) {
+  return (
+    <Pressable
+      style={({ pressed }) => [styles.navTile, pressed && styles.navTilePressed]}
+      onPress={onPress}
+    >
+      <View style={[styles.navIconWrap, { backgroundColor: color + '15' }]}>
+        <Icon name={icon} size={22} color={color} />
+      </View>
+      <Text style={styles.navLabel}>{label}</Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bgPrimary },
+  container: { flex: 1, backgroundColor: colors.bgDeep },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingVertical: 14,
+    borderBottomWidth: 1, borderBottomColor: colors.glassBorder,
   },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  headerTitle: { color: colors.accentCyan, fontSize: 20, fontWeight: '700' },
-  wsDot: { width: 8, height: 8, borderRadius: 4 },
-  wsOn: { backgroundColor: colors.accentGreen },
-  wsOff: { backgroundColor: colors.accentRed },
-  settingsBtn: { padding: 4 },
-  list: { padding: 16, gap: 12, flexGrow: 1 },
-  bubble: { maxWidth: '80%', padding: 12, borderRadius: 16 },
-  userBubble: {
-    alignSelf: 'flex-end',
-    backgroundColor: '#1F6FEB',
-    borderBottomRightRadius: 4,
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  logoWrap: {
+    width: 36, height: 36, borderRadius: 12,
+    backgroundColor: 'rgba(0,242,255,0.12)',
+    alignItems: 'center', justifyContent: 'center',
   },
-  auraBubble: {
-    alignSelf: 'flex-start',
-    backgroundColor: colors.bgSecondary,
-    borderBottomLeftRadius: 4,
+  headerTitle: { ...typography.headlineMd, color: colors.onSurface, fontSize: 18, letterSpacing: 1 },
+  headerSub: { color: colors.onSurface, fontSize: 10, fontWeight: '500', letterSpacing: 0.5 },
+  statusPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 10, paddingVertical: 5,
+    borderRadius: 20, borderWidth: 1, borderColor: 'rgba(63,185,80,0.2)',
   },
-  auraLabel: { color: colors.accentCyan, fontSize: 11, fontWeight: '600', marginBottom: 4 },
-  userText: { color: '#F0F6FC', fontSize: 15 },
-  auraText: { color: '#F0F6FC', fontSize: 15, lineHeight: 22 },
-  timestamp: { color: colors.textMuted, fontSize: 10, marginTop: 4, alignSelf: 'flex-end' },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 60, gap: 8 },
-  emptyTitle: { color: colors.textSecondary, fontSize: 24, fontWeight: '700', marginTop: 8 },
-  emptySubtext: { color: colors.textMuted, fontSize: 14 },
-  wsLabel: { color: colors.textMuted, fontSize: 11, fontWeight: '600', marginTop: 4 },
-  inputRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 8,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    backgroundColor: colors.bgPrimary,
-    alignItems: 'flex-end',
+  statusDot: { width: 6, height: 6, borderRadius: 3 },
+  statusText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
+  scroll: { padding: spacing.lg, gap: spacing.lg },
+  heroCard: {},
+  heroContent: { padding: spacing.xl },
+  heroRow: { flexDirection: 'row', alignItems: 'center' },
+  heroStat: { flex: 1 },
+  heroDivider: { width: 1, height: 36, backgroundColor: colors.glassBorder, marginHorizontal: 12 },
+  heroLabel: { ...typography.labelSm, color: colors.primary, marginBottom: spacing.xs },
+  heroValue: { ...typography.labelSm, fontSize: 13, letterSpacing: 0, flexWrap: 'nowrap' as any },
+  statsRow: { flexDirection: 'row', gap: spacing.sm },
+  statHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: spacing.sm },
+  statLabel: { ...typography.labelSm, color: colors.primary },
+  statValue: { ...typography.displayLg, fontSize: 18, marginBottom: spacing.sm },
+  miniBar: { height: 3, borderRadius: 1.5, backgroundColor: 'rgba(255,255,255,0.05)', overflow: 'hidden' },
+  miniBarFill: { height: '100%', borderRadius: 1.5 },
+  sectionLabel: { ...typography.labelMd, color: colors.primary, marginTop: spacing.xs },
+  navGrid: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: 10,
   },
-  input: {
-    flex: 1,
-    backgroundColor: colors.bgSecondary,
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    color: colors.textPrimary,
-    fontSize: 15,
-    maxHeight: 100,
+  navTile: {
+    width: '30%', aspectRatio: 1.2,
+    backgroundColor: colors.glassBg,
+    borderRadius: radius.card,
+    alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
+    borderWidth: 1, borderColor: colors.glassBorder,
   },
-  sendBtn: {
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    width: 40,
-    height: 40,
-    backgroundColor: colors.accentCyan,
+  navTilePressed: { opacity: 0.85, transform: [{ scale: 0.96 }] },
+  menuBtn: {
+    width: 36, height: 36, borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center', justifyContent: 'center',
   },
-  sendBtnDisabled: { opacity: 0.3 },
-  sendArrow: { color: '#fff', fontSize: 20, fontWeight: '700' },
-  micBtn: {
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    width: 44,
-    height: 44,
-    backgroundColor: colors.bgTertiary,
+  navIconWrap: {
+    width: 40, height: 40, borderRadius: 12,
+    alignItems: 'center', justifyContent: 'center',
   },
-  micBtnActive: {
-    backgroundColor: colors.accentRed,
+  navLabel: { color: colors.onSurface, fontSize: 11, fontWeight: '600' },
+  weatherCard: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
   },
-  micIcon: { fontSize: 18 },
+  weatherTemp: { ...typography.displayLg, fontSize: 32 },
+  weatherDesc: { color: colors.onSurface, fontSize: 13, marginTop: 2, textTransform: 'capitalize' },
 });

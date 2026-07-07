@@ -1,10 +1,13 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
-  View, Text, TextInput, Pressable, ScrollView, StyleSheet,
-  SafeAreaView, Alert, RefreshControl, ActivityIndicator,
+  View, Text, Pressable, ScrollView, StyleSheet,
+  SafeAreaView, Alert, RefreshControl, ActivityIndicator, Platform,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
+import * as Clipboard from 'expo-clipboard';
 import Animated, { FadeInDown } from 'react-native-reanimated';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import {
   systemLock, systemSleep, systemShutdown, systemRestart,
   getVolume, setVolume, muteAudio,
@@ -13,23 +16,28 @@ import {
   clipboardCopy, clipboardPaste,
   getWeather, getNews, triggerBriefing,
 } from '../../src/api/aura';
-import { colors } from '../../src/theme';
-
-// ── Weather ─────────────────────────────────────────────────────────
+import { colors, spacing, radius, typography } from '../../src/theme';
+import GlassCard from '../../src/components/GlassCard';
+import GlassButton from '../../src/components/GlassButton';
+import GlassInput from '../../src/components/GlassInput';
+import Slider from '@react-native-community/slider';
 
 function WeatherWidget({ data }: { data: any }) {
   if (!data) return null;
   const desc = typeof data === 'string' ? data : data.description || data.weather || '';
   const temp = data.temp ?? '';
   return (
-    <Animated.View entering={FadeInDown.duration(300).delay(0)} style={styles.weatherCard}>
-      <Text style={styles.weatherTemp}>{typeof temp === 'number' ? `${Math.round(temp)}°C` : temp}</Text>
-      <Text style={styles.weatherDesc}>{desc}</Text>
-    </Animated.View>
+    <GlassCard glow="cyan">
+      <View style={styles.weatherCard}>
+        <View>
+          <Text style={styles.weatherTemp}>{typeof temp === 'number' ? `${Math.round(temp)}°C` : temp}</Text>
+          <Text style={styles.weatherDesc}>{desc}</Text>
+        </View>
+        <MaterialIcons name="wb-sunny" size={28} color={colors.warning} style={{ opacity: 0.6 }} />
+      </View>
+    </GlassCard>
   );
 }
-
-// ── Briefing Button ──────────────────────────────────────────────────
 
 function BriefingButton() {
   const [loading, setLoading] = useState(false);
@@ -46,25 +54,25 @@ function BriefingButton() {
   };
   return (
     <Pressable
-      style={({ pressed }) => [styles.briefingBtn, pressed && { opacity: 0.8 }]}
+      style={({ pressed }) => [styles.briefingBtn, pressed && { opacity: 0.85 }]}
       onPress={handleBriefing}
       disabled={loading}
     >
-      <Text style={styles.briefingIcon}>📋</Text>
+      <View style={styles.briefingIconWrap}>
+        <MaterialIcons name="campaign" size={20} color={colors.primary} />
+      </View>
       <View style={styles.briefingText}>
         <Text style={styles.briefingTitle}>Daily Briefing</Text>
-        <Text style={styles.briefingSub}>Get your full status report</Text>
+        <Text style={styles.briefingSub}>Full system status report</Text>
       </View>
       {loading ? (
-        <ActivityIndicator color={colors.accentCyan} size="small" />
+        <ActivityIndicator color={colors.primary} size="small" />
       ) : (
-        <Text style={styles.briefingArrow}>→</Text>
+        <MaterialIcons name="arrow-forward-ios" size={14} color={colors.onSurfaceMuted} />
       )}
     </Pressable>
   );
 }
-
-// ── Power Action Button ──────────────────────────────────────────────
 
 function PowerButton({ icon, label, color, onPress, confirm }: {
   icon: string; label: string; color: string; onPress: () => Promise<void>; confirm?: string;
@@ -88,17 +96,19 @@ function PowerButton({ icon, label, color, onPress, confirm }: {
   };
   return (
     <Pressable
-      style={({ pressed }) => [styles.powerBtn, { borderColor: color + '40' }, pressed && { opacity: 0.7 }]}
+      style={({ pressed }) => [styles.powerBtn, { borderColor: color + '30' }, pressed && { opacity: 0.85 }]}
       onPress={handlePress}
       disabled={loading}
     >
-      {loading ? <ActivityIndicator color={color} /> : <Text style={[styles.powerIcon]}>{icon}</Text>}
+      <View style={[styles.powerIconWrap, { backgroundColor: color + '12' }]}>
+        {loading ? <ActivityIndicator color={color} size="small" /> : (
+          <MaterialIcons name={icon as any} size={22} color={color} />
+        )}
+      </View>
       <Text style={[styles.powerLabel, { color }]}>{label}</Text>
     </Pressable>
   );
 }
-
-// ── Mute Button ──────────────────────────────────────────────────────
 
 function MuteButton() {
   const [muted, setMuted] = useState(false);
@@ -106,62 +116,93 @@ function MuteButton() {
   const toggle = async () => {
     setLoading(true);
     try {
-      const res = await muteAudio(!muted);
+      await muteAudio(!muted);
       setMuted(!muted);
     } catch (e: any) { Alert.alert('Error', e.message); }
     finally { setLoading(false); }
   };
   return (
     <Pressable
-      style={({ pressed }) => [styles.muteBtn, pressed && { opacity: 0.7 }]}
+      style={({ pressed }) => [styles.muteBtn, pressed && { opacity: 0.85 }]}
       onPress={toggle}
       disabled={loading}
     >
-      <Text style={styles.muteIcon}>{muted ? '🔇' : '🔊'}</Text>
+      <MaterialIcons name={muted ? 'volume-off' : 'volume-up'} size={18} color={colors.onSurfaceSecondary} />
       <Text style={styles.muteLabel}>{muted ? 'Unmute' : 'Mute'}</Text>
     </Pressable>
   );
 }
 
-// ── Volume Control ───────────────────────────────────────────────────
-
 function VolumeControl() {
   const [vol, setVol] = useState<number | null>(null);
+  const [displayVol, setDisplayVol] = useState(50);
   const [loading, setLoading] = useState(false);
+  const lastCommitRef = useRef(0);
+  const isCommittingRef = useRef(false);
   const loadVol = async () => {
     try {
       const res = await getVolume();
-      if (res.volume !== undefined) setVol(res.volume);
+      if (res.volume !== undefined) { setVol(res.volume); setDisplayVol(res.volume); }
     } catch {}
   };
   useEffect(() => { loadVol(); }, []);
-  const changeVol = async (delta: number) => {
-    if (vol === null) return;
-    setLoading(true);
-    const newVol = Math.max(0, Math.min(100, vol + delta));
+
+  const commitVolume = useCallback(async (value: number) => {
+    if (isCommittingRef.current) return;
+    const now = Date.now();
+    if (now - lastCommitRef.current < 250) return;
+    lastCommitRef.current = now;
+    isCommittingRef.current = true;
     try {
-      await setVolume(newVol);
-      setVol(newVol);
+      await setVolume(value);
+      setVol(value);
+    } catch (e: any) { Alert.alert('Error', e.message); }
+    finally { isCommittingRef.current = false; }
+  }, []);
+
+  const handleSlidingComplete = useCallback(async (value: number) => {
+    if (vol === value) return;
+    setLoading(true);
+    try {
+      await setVolume(value);
+      setVol(value);
     } catch (e: any) { Alert.alert('Error', e.message); }
     finally { setLoading(false); }
-  };
+  }, [vol]);
+
   return (
-    <View style={styles.volRow}>
-      <Text style={styles.volLabel}>Volume: {vol ?? '?'}%</Text>
-      <View style={styles.volBtns}>
-        <Pressable style={styles.volBtn} onPress={() => changeVol(-10)} disabled={loading}>
-          <Text style={styles.volBtnText}>−10</Text>
-        </Pressable>
-        <MuteButton />
-        <Pressable style={styles.volBtn} onPress={() => changeVol(10)} disabled={loading}>
-          <Text style={styles.volBtnText}>+10</Text>
-        </Pressable>
+    <GlassCard>
+      <View style={styles.volHeader}>
+        <View style={styles.volLeft}>
+          <MaterialIcons name="volume-up" size={18} color={colors.primary} />
+          <Text style={styles.volLabel}>Volume</Text>
+        </View>
+        <Text style={styles.volValue}>{displayVol}%</Text>
       </View>
-    </View>
+      <Slider
+        style={{ width: '100%', height: 36 }}
+        minimumValue={0}
+        maximumValue={100}
+        step={1}
+        value={displayVol}
+        onValueChange={(v) => {
+          setDisplayVol(v);
+          commitVolume(v);
+        }}
+        onSlidingComplete={handleSlidingComplete}
+        minimumTrackTintColor={colors.primary}
+        maximumTrackTintColor="rgba(255,255,255,0.1)"
+        thumbTintColor={colors.primary}
+        disabled={loading}
+      />
+      <View style={styles.volFooter}>
+        <Text style={styles.volMin}>0</Text>
+        <MuteButton />
+        <Text style={styles.volMax}>100</Text>
+      </View>
+    </GlassCard>
   );
 }
-
-// ── Now Playing ──────────────────────────────────────────────────────
 
 function NowPlaying() {
   const [track, setTrack] = useState<any>(null);
@@ -191,43 +232,44 @@ function NowPlaying() {
   };
 
   return (
-    <Animated.View entering={FadeInDown.duration(300).delay(60)} style={styles.nowPlayingCard}>
+    <GlassCard glow="purple">
       <View style={styles.npHeader}>
+        <View style={styles.npIconWrap}>
+          <MaterialIcons name="music-note" size={18} color={colors.secondary} />
+        </View>
         <View style={styles.npInfo}>
           <Text style={styles.npTitle} numberOfLines={1}>{track.title || 'Unknown'}</Text>
           {track.artist && <Text style={styles.npArtist} numberOfLines={1}>{track.artist}</Text>}
           {track.source_app && <Text style={styles.npSource}>{track.source_app}</Text>}
         </View>
         <View style={styles.npIndicator}>
-          <View style={[styles.npDot, track.is_playing && styles.npDotActive]} />
+          <View style={[styles.npDot, track.is_playing && { backgroundColor: colors.tertiary }]} />
         </View>
       </View>
       <View style={styles.npControls}>
         <Pressable style={styles.npBtn} onPress={() => send('prev')}>
-          <Text style={styles.npBtnText}>⏮</Text>
+          <MaterialIcons name="skip-previous" size={22} color={colors.onSurfaceSecondary} />
         </Pressable>
         <Pressable style={[styles.npBtn, styles.npPlayBtn]} onPress={() => send('play_pause')}>
-          <Text style={styles.npBtnText}>{track.is_playing ? '⏸' : '▶️'}</Text>
+          <MaterialIcons name={track.is_playing ? 'pause' : 'play-arrow'} size={24} color={colors.onSurface} />
         </Pressable>
         <Pressable style={styles.npBtn} onPress={() => send('next')}>
-          <Text style={styles.npBtnText}>⏭</Text>
+          <MaterialIcons name="skip-next" size={22} color={colors.onSurfaceSecondary} />
         </Pressable>
       </View>
-    </Animated.View>
+    </GlassCard>
   );
 }
 
-// ── Quick Launch Grid ────────────────────────────────────────────────
-
 const APPS = [
-  { name: 'Spotify',   app: 'spotify',       icon: '🎵' },
-  { name: 'Chrome',    app: 'chrome',        icon: '🌐' },
-  { name: 'VS Code',   app: 'vscode',        icon: '💻' },
-  { name: 'Discord',   app: 'discord',       icon: '💬' },
-  { name: 'Terminal',  app: 'terminal',      icon: '⬛' },
-  { name: 'Notepad',   app: 'notepad',       icon: '📝' },
-  { name: 'Explorer',  app: 'file explorer', icon: '📁' },
-  { name: 'Steam',     app: 'steam',         icon: '🎮' },
+  { name: 'Spotify',   app: 'spotify',       icon: 'music-note', color: colors.tertiary },
+  { name: 'Chrome',    app: 'chrome',        icon: 'language', color: colors.primary },
+  { name: 'VS Code',   app: 'vscode',        icon: 'code', color: '#388BFD' },
+  { name: 'Discord',   app: 'discord',       icon: 'chat', color: colors.secondary },
+  { name: 'Terminal',  app: 'terminal',      icon: 'terminal', color: colors.onSurfaceSecondary },
+  { name: 'Notepad',   app: 'notepad',       icon: 'edit', color: colors.warning },
+  { name: 'Explorer',  app: 'file explorer', icon: 'folder', color: '#2DD4A8' },
+  { name: 'Steam',     app: 'steam',         icon: 'sports-esports', color: colors.secondary },
 ];
 
 function QuickLaunch() {
@@ -242,26 +284,26 @@ function QuickLaunch() {
   };
   return (
     <View style={styles.appGrid}>
-      {APPS.map((app, i) => (
+      {APPS.map((app) => (
         <Pressable
           key={app.app}
-          style={({ pressed }) => [styles.appBtn, pressed && { opacity: 0.7 }]}
+          style={({ pressed }) => [styles.appBtn, pressed && { opacity: 0.85 }]}
           onPress={() => handleLaunch(app.app)}
           disabled={launching === app.app}
         >
-          {launching === app.app ? (
-            <ActivityIndicator color={colors.accentCyan} size="small" />
-          ) : (
-            <Text style={styles.appIcon}>{app.icon}</Text>
-          )}
+          <View style={[styles.appIconWrap, { backgroundColor: app.color + '12' }]}>
+            {launching === app.app ? (
+              <ActivityIndicator color={app.color} size="small" />
+            ) : (
+              <MaterialIcons name={app.icon as any} size={20} color={app.color} />
+            )}
+          </View>
           <Text style={styles.appName}>{app.name}</Text>
         </Pressable>
       ))}
     </View>
   );
 }
-
-// ── Clipboard Section ────────────────────────────────────────────────
 
 function ClipboardSection() {
   const [text, setText] = useState('');
@@ -291,34 +333,37 @@ function ClipboardSection() {
   };
 
   return (
-    <View style={styles.clipSection}>
-      <TextInput
+    <GlassCard>
+      <GlassInput
         style={styles.clipInput}
         value={text}
         onChangeText={setText}
         placeholder="Text to copy to PC..."
-        placeholderTextColor={colors.textMuted}
         multiline
       />
       <View style={styles.clipBtns}>
-        <Pressable style={styles.clipBtn} onPress={handleCopy} disabled={copying || !text.trim()}>
-          <Text style={styles.clipBtnText}>{copying ? '...' : '↑ Copy to PC'}</Text>
-        </Pressable>
-        <Pressable style={styles.clipBtn} onPress={handlePaste} disabled={pasting}>
-          <Text style={styles.clipBtnText}>{pasting ? '...' : '↓ Read PC'}</Text>
-        </Pressable>
+        <GlassButton variant="primary" onPress={handleCopy} disabled={copying || !text.trim()}>
+          {copying ? '...' : 'Copy to PC'}
+        </GlassButton>
+        <GlassButton variant="secondary" onPress={handlePaste} disabled={pasting}>
+          {pasting ? '...' : 'Read PC'}
+        </GlassButton>
       </View>
       {pcClip ? (
         <View style={styles.clipResult}>
-          <Text style={styles.clipResultLabel}>PC Clipboard:</Text>
+          <Text style={styles.clipResultLabel}>PC Clipboard</Text>
           <Text style={styles.clipResultText} numberOfLines={3}>{pcClip}</Text>
+          <GlassButton variant="secondary" onPress={async () => {
+            await Clipboard.setStringAsync(pcClip);
+            Alert.alert('Copied', 'PC clipboard text copied to phone');
+          }}>
+            Copy to Phone
+          </GlassButton>
         </View>
       ) : null}
-    </View>
+    </GlassCard>
   );
 }
-
-// ── News Headlines ───────────────────────────────────────────────────
 
 function NewsSection() {
   const [headlines, setHeadlines] = useState<any[]>([]);
@@ -338,18 +383,19 @@ function NewsSection() {
 
   return (
     <View style={styles.newsSection}>
-      <Text style={styles.sectionTitle}>📰 Headlines</Text>
+      <View style={styles.sectionHeader}>
+        <MaterialIcons name="newspaper" size={16} color={colors.onSurfaceMuted} />
+        <Text style={styles.sectionLabel}>HEADLINES</Text>
+      </View>
       {headlines.map((h, i) => (
-        <View key={i} style={styles.newsItem}>
+        <GlassCard key={i}>
           <Text style={styles.newsTitle} numberOfLines={2}>{h.title}</Text>
           <Text style={styles.newsSource}>{h.source}</Text>
-        </View>
+        </GlassCard>
       ))}
     </View>
   );
 }
-
-// ── Main Screen ──────────────────────────────────────────────────────
 
 export default function ActionsScreen() {
   const router = useRouter();
@@ -378,184 +424,131 @@ export default function ActionsScreen() {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Actions</Text>
         <View style={styles.headerLinks}>
-          <Pressable onPress={() => router.push('/notes')}>
+          <Pressable onPress={() => router.push('/(tabs)/notes')} style={styles.headerLinkBtn}>
+            <MaterialIcons name="edit-note" size={16} color={colors.primary} />
             <Text style={styles.headerLink}>Notes</Text>
-          </Pressable>
-          <Pressable onPress={() => router.push('/files')}>
-            <Text style={styles.headerLink}>Files</Text>
-          </Pressable>
-          <Pressable onPress={() => router.push('/processes')}>
-            <Text style={styles.headerLink}>Procs</Text>
           </Pressable>
         </View>
       </View>
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accentCyan} colors={[colors.accentCyan]} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} colors={[colors.primary]} />
         }
+        showsVerticalScrollIndicator={false}
       >
-        {/* Weather + Briefing */}
         <WeatherWidget data={weather} />
         <BriefingButton />
 
-        {/* Power Controls */}
-        <Text style={styles.sectionTitle}>⚡ System</Text>
+        <View style={styles.sectionHeader}>
+          <MaterialIcons name="power-settings-new" size={16} color={colors.onSurfaceMuted} />
+          <Text style={styles.sectionLabel}>SYSTEM</Text>
+        </View>
         <View style={styles.powerGrid}>
-          <PowerButton icon="🔒" label="Lock" color={colors.accentCyan} onPress={systemLock} />
-          <PowerButton icon="🌙" label="Sleep" color={colors.accentPurple} onPress={systemSleep} />
-          <PowerButton icon="🔄" label="Restart" color={colors.accentOrange} onPress={systemRestart} confirm="Restart your PC?" />
-          <PowerButton icon="⏻" label="Shutdown" color={colors.accentRed} onPress={systemShutdown} confirm="Shut down your PC?" />
+          <PowerButton icon="lock" label="Lock" color={colors.primary} onPress={systemLock} />
+          <PowerButton icon="bedtime" label="Sleep" color={colors.secondary} onPress={systemSleep} />
+          <PowerButton icon="restart-alt" label="Restart" color={colors.warning} onPress={systemRestart} confirm="Restart your PC?" />
+          <PowerButton icon="power-settings-new" label="Shutdown" color={colors.error} onPress={systemShutdown} confirm="Shut down your PC?" />
         </View>
 
-        {/* Volume */}
-        <Text style={styles.sectionTitle}>🔊 Audio</Text>
+        <View style={styles.sectionHeader}>
+          <MaterialIcons name="volume-up" size={16} color={colors.onSurfaceMuted} />
+          <Text style={styles.sectionLabel}>AUDIO</Text>
+        </View>
         <VolumeControl />
-
-        {/* Now Playing */}
         <NowPlaying />
 
-        {/* Quick Launch */}
-        <Text style={styles.sectionTitle}>🚀 Quick Launch</Text>
+        <View style={styles.sectionHeader}>
+          <MaterialIcons name="grid-view" size={16} color={colors.onSurfaceMuted} />
+          <Text style={styles.sectionLabel}>QUICK LAUNCH</Text>
+        </View>
         <QuickLaunch />
 
-        {/* Clipboard */}
-        <Text style={styles.sectionTitle}>📋 Clipboard</Text>
+        <View style={styles.sectionHeader}>
+          <MaterialIcons name="content-paste" size={16} color={colors.onSurfaceMuted} />
+          <Text style={styles.sectionLabel}>CLIPBOARD</Text>
+        </View>
         <ClipboardSection />
 
-        {/* News */}
         <NewsSection />
-
         <View style={{ height: 40 }} />
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-// ── Styles ─────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bgPrimary },
+  container: { flex: 1, backgroundColor: colors.bgDeep },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: colors.border,
+    paddingHorizontal: 20, paddingVertical: 14,
+    borderBottomWidth: 1, borderBottomColor: colors.glassBorder,
   },
-  headerTitle: { color: colors.accentCyan, fontSize: 20, fontWeight: '700' },
+  headerTitle: { ...typography.headlineMd, color: colors.onSurface, fontSize: 18, letterSpacing: 1 },
   headerLinks: { flexDirection: 'row', gap: 12 },
-  headerLink: { color: colors.accentCyan, fontSize: 13, fontWeight: '600' },
-  scroll: { padding: 16, gap: 16 },
-
-  // Weather
+  headerLinkBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  headerLink: { color: colors.primary, fontSize: 13, fontWeight: '600' },
+  scroll: { padding: spacing.lg, gap: spacing.lg },
   weatherCard: {
-    backgroundColor: colors.bgSecondary, borderRadius: 14, padding: 16,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
   },
-  weatherTemp: { color: colors.textPrimary, fontSize: 28, fontWeight: '700' },
-  weatherDesc: { color: colors.textSecondary, fontSize: 15 },
-
-  // Briefing
+  weatherTemp: { ...typography.displayLg, fontSize: 28 },
+  weatherDesc: { color: colors.onSurface, fontSize: 13, marginTop: 2, textTransform: 'capitalize' },
   briefingBtn: {
-    backgroundColor: colors.bgSecondary, borderRadius: 14, padding: 16,
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    borderWidth: 1, borderColor: colors.accentCyan + '30',
+    backgroundColor: colors.glassBg, borderRadius: radius.card, padding: spacing.lg,
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    borderWidth: 1, borderColor: 'rgba(0,242,255,0.2)',
   },
-  briefingIcon: { fontSize: 24 },
+  briefingIconWrap: { width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(0,242,255,0.12)', alignItems: 'center', justifyContent: 'center' },
   briefingText: { flex: 1 },
-  briefingTitle: { color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
-  briefingSub: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
-  briefingArrow: { color: colors.accentCyan, fontSize: 18, fontWeight: '700' },
-
-  // Section
-  sectionTitle: { color: colors.textSecondary, fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-
-  // Power Grid
-  powerGrid: {
-    flexDirection: 'row', flexWrap: 'wrap', gap: 10,
-  },
+  briefingTitle: { ...typography.headlineMd, color: colors.onSurface, fontSize: 14 },
+  briefingSub: { color: colors.onSurface, fontSize: 11, marginTop: 2 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+  sectionLabel: { ...typography.labelMd, color: colors.primary },
+  powerGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   powerBtn: {
     width: '47%', aspectRatio: 1.6,
-    backgroundColor: colors.bgSecondary, borderRadius: 14,
-    alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: colors.glassBg, borderRadius: radius.card,
+    alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
     borderWidth: 1,
   },
-  powerIcon: { fontSize: 28 },
-  powerLabel: { fontSize: 13, fontWeight: '700' },
-
-  // Volume
-  volRow: {
-    backgroundColor: colors.bgSecondary, borderRadius: 14, padding: 16, gap: 12,
-  },
-  volLabel: { color: colors.textSecondary, fontSize: 13, fontWeight: '600' },
-  volBtns: { flexDirection: 'row', gap: 10, alignItems: 'center' },
-  volBtn: {
-    flex: 1, backgroundColor: colors.bgTertiary, borderRadius: 10,
-    paddingVertical: 12, alignItems: 'center',
-  },
-  volBtnText: { color: colors.textPrimary, fontSize: 16, fontWeight: '700' },
-  muteBtn: {
-    backgroundColor: colors.bgTertiary, borderRadius: 10,
-    paddingVertical: 12, paddingHorizontal: 16,
-    alignItems: 'center', minWidth: 80,
-  },
-  muteIcon: { fontSize: 20 },
-  muteLabel: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
-
-  // Now Playing
-  nowPlayingCard: {
-    backgroundColor: colors.bgSecondary, borderRadius: 14, padding: 16, gap: 12,
-  },
-  npHeader: { flexDirection: 'row', gap: 12, alignItems: 'center' },
+  powerIconWrap: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  powerLabel: { fontSize: 12, fontWeight: '700', letterSpacing: 0.5 },
+  volHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.xs },
+  volLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  volLabel: { color: colors.onSurface, fontSize: 13, fontWeight: '600' },
+  volValue: { ...typography.displayLg, fontSize: 22, color: colors.primary },
+  volMin: { color: colors.onSurface, fontSize: 11 },
+  volMax: { color: colors.onSurface, fontSize: 11 },
+  volFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  muteBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.glassBg, borderRadius: spacing.sm, paddingVertical: 6, paddingHorizontal: 12, borderWidth: 1, borderColor: colors.glassBorder },
+  muteLabel: { color: colors.onSurface, fontSize: 11, fontWeight: '600' },
+  npHeader: { flexDirection: 'row', gap: spacing.md, alignItems: 'center' },
+  npIconWrap: { width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(188,140,255,0.12)', alignItems: 'center', justifyContent: 'center' },
   npInfo: { flex: 1 },
-  npTitle: { color: colors.textPrimary, fontSize: 16, fontWeight: '700' },
-  npArtist: { color: colors.textSecondary, fontSize: 13, marginTop: 2 },
-  npSource: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  npTitle: { ...typography.bodyMd, color: colors.onSurface, fontWeight: '700' },
+  npArtist: { color: colors.onSurface, fontSize: 12, marginTop: 2 },
+  npSource: { color: colors.onSurface, fontSize: 10, marginTop: 2 },
   npIndicator: {},
-  npDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.textMuted },
-  npDotActive: { backgroundColor: colors.accentGreen },
-  npControls: { flexDirection: 'row', justifyContent: 'center', gap: 24 },
-  npBtn: { padding: 8 },
-  npPlayBtn: { backgroundColor: colors.bgTertiary, borderRadius: 24, padding: 12 },
-  npBtnText: { fontSize: 22 },
-
-  // Quick Launch
-  appGrid: {
-    flexDirection: 'row', flexWrap: 'wrap', gap: 10,
-  },
+  npDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.onSurfaceMuted },
+  npControls: { flexDirection: 'row', justifyContent: 'center', gap: 20, marginTop: spacing.sm },
+  npBtn: { padding: spacing.sm, borderRadius: 20 },
+  npPlayBtn: { backgroundColor: colors.glassBg, borderRadius: 24, padding: spacing.md },
+  appGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   appBtn: {
     width: '22%', aspectRatio: 1,
-    backgroundColor: colors.bgSecondary, borderRadius: 14,
+    backgroundColor: colors.glassBg, borderRadius: radius.card,
     alignItems: 'center', justifyContent: 'center', gap: 6,
+    borderWidth: 1, borderColor: colors.glassBorder,
   },
-  appIcon: { fontSize: 24 },
-  appName: { color: colors.textMuted, fontSize: 11, fontWeight: '500' },
-
-  // Clipboard
-  clipSection: {
-    backgroundColor: colors.bgSecondary, borderRadius: 14, padding: 16, gap: 10,
-  },
-  clipInput: {
-    backgroundColor: colors.bgTertiary, borderRadius: 10,
-    color: colors.textPrimary, padding: 12, fontSize: 14,
-    minHeight: 60, textAlignVertical: 'top',
-  },
-  clipBtns: { flexDirection: 'row', gap: 10 },
-  clipBtn: {
-    flex: 1, backgroundColor: colors.accentCyan, borderRadius: 10,
-    paddingVertical: 12, alignItems: 'center',
-  },
-  clipBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  clipResult: {
-    backgroundColor: colors.bgTertiary, borderRadius: 10, padding: 12, gap: 4,
-  },
-  clipResultLabel: { color: colors.textMuted, fontSize: 11, fontWeight: '600' },
-  clipResultText: { color: colors.textSecondary, fontSize: 13 },
-
-  // News
+  appIconWrap: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  appName: { color: colors.onSurface, fontSize: 10, fontWeight: '600' },
+  clipInput: { minHeight: 56, textAlignVertical: 'top' },
+  clipBtns: { flexDirection: 'row', gap: 10, marginTop: spacing.sm },
+  clipResult: { backgroundColor: colors.glassBg, borderRadius: 10, padding: spacing.md, gap: spacing.xs, marginTop: spacing.sm },
+  clipResultLabel: { ...typography.labelMd, color: colors.primary, fontSize: 10 },
+  clipResultText: { color: colors.onSurface, fontSize: 12, lineHeight: 18 },
   newsSection: { gap: 10 },
-  newsItem: {
-    backgroundColor: colors.bgSecondary, borderRadius: 10, padding: 12, gap: 4,
-  },
-  newsTitle: { color: colors.textPrimary, fontSize: 13, lineHeight: 18 },
-  newsSource: { color: colors.textMuted, fontSize: 11 },
+  newsTitle: { ...typography.bodyMd, color: colors.onSurface, fontWeight: '500' },
+  newsSource: { color: colors.onSurface, fontSize: 10, fontWeight: '600', marginTop: spacing.xs },
 });

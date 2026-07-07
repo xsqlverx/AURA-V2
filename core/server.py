@@ -6,6 +6,7 @@ import logging
 import os
 import socket
 import threading
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
@@ -100,6 +101,72 @@ def _start_socket_bridge() -> None:
     t.start()
 
 
+# ── Dynamic Island scheduler ──────────────────────────────────────────────────
+# Pushes weather, news, and briefing data to the Dynamic Island overlay.
+
+_DI_WEATHER_INTERVAL = 1800   # 30 minutes
+_DI_NEWS_INTERVAL = 3600      # 1 hour
+_DI_BRIEFING_INTERVAL = 14400 # 4 hours
+_di_last_weather = 0.0
+_di_last_news = 0.0
+_di_last_briefing = 0.0
+
+def _push_di(event_type: str, data: dict) -> None:
+    """Broadcast a DYNAMIC_ISLAND: message to all WS clients."""
+    try:
+        msg = json.dumps({"type": event_type, "data": data})
+        ws_manager.broadcast_sync(f"DYNAMIC_ISLAND:{msg}")
+    except Exception as e:
+        logger.warning("DI push failed: %s", e)
+
+async def _di_fetch_weather() -> None:
+    """Fetch weather and push to Dynamic Island."""
+    global _di_last_weather
+    now = time.time()
+    if now - _di_last_weather < _DI_WEATHER_INTERVAL:
+        return
+    try:
+        from memory.context import get_weather_data
+        weather = await get_weather_data()
+        if weather and weather.get("temp"):
+            _push_di("weather", weather)
+            _di_last_weather = now
+    except Exception as e:
+        logger.warning("DI weather fetch failed: %s", e)
+
+async def _di_fetch_news() -> None:
+    """Fetch news headlines and push to Dynamic Island."""
+    global _di_last_news
+    now = time.time()
+    if now - _di_last_news < _DI_NEWS_INTERVAL:
+        return
+    try:
+        from tools.web import get_news_headlines
+        news = await get_news_headlines(5)
+        if news:
+            _push_di("news", {"headlines": news})
+            _di_last_news = now
+    except Exception as e:
+        logger.warning("DI news fetch failed: %s", e)
+
+async def _di_scheduler_loop() -> None:
+    """Background loop that periodically pushes data to the Dynamic Island."""
+    import time as _time
+    while True:
+        try:
+            await _di_fetch_weather()
+            await _di_fetch_news()
+        except Exception as e:
+            logger.warning("DI scheduler error: %s", e)
+        await asyncio.sleep(300)  # Check every 5 minutes
+
+def _start_di_scheduler() -> None:
+    """Start the Dynamic Island background scheduler."""
+    loop = asyncio.get_event_loop()
+    loop.create_task(_di_scheduler_loop())
+    logger.info("Dynamic Island scheduler started.")
+
+
 # ── TTS response helper ───────────────────────────────────────────────────────
 # Feeds UI chat/briefing responses to the TTS engine so Aura speaks them aloud.
 
@@ -156,6 +223,9 @@ async def lifespan(app: FastAPI):
     # Start window tracker daemon for briefing activity data
     from tools import tracker
     tracker.start()
+
+    # Start Dynamic Island scheduler
+    _start_di_scheduler()
 
     yield
     logger.info("Aura backend shutting down.")
@@ -259,6 +329,9 @@ class MuteRequest(BaseModel):
 class AppLaunchRequest(BaseModel):
     app_name: str
 
+class AppKillRequest(BaseModel):
+    pid: int
+
 class FileOpenRequest(BaseModel):
     path: str
 
@@ -311,6 +384,24 @@ def _load_friends() -> list[dict]:
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.post("/dynamic-island/push")
+async def dynamic_island_push(event_type: str = "info", data: Optional[dict] = None):
+    """Manually push a notification to the Dynamic Island overlay."""
+    _push_di(event_type, data or {})
+    return {"success": True, "type": event_type}
+
+
+@app.post("/dynamic-island/config")
+async def dynamic_island_config(weather_interval: Optional[int] = None, news_interval: Optional[int] = None):
+    """Update Dynamic Island polling intervals (in seconds)."""
+    global _DI_WEATHER_INTERVAL, _DI_NEWS_INTERVAL
+    if weather_interval is not None:
+        _DI_WEATHER_INTERVAL = weather_interval
+    if news_interval is not None:
+        _DI_NEWS_INTERVAL = news_interval
+    return {"success": True, "weather_interval": _DI_WEATHER_INTERVAL, "news_interval": _DI_NEWS_INTERVAL}
 
 
 @app.get("/weather")
@@ -754,10 +845,20 @@ async def apps_launch(req: AppLaunchRequest):
     return await loop.run_in_executor(None, launch_app, req.app_name)
 
 @app.get("/apps/processes")
-async def apps_processes(filter_pattern: Optional[str] = None):
+async def apps_processes(
+    filter_pattern: Optional[str] = None,
+    exclude_system: Optional[bool] = True,
+):
     from tools.system import list_running_processes
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, list_running_processes, filter_pattern)
+    return await loop.run_in_executor(None, list_running_processes, filter_pattern, exclude_system)
+
+
+@app.post("/apps/kill")
+async def apps_kill(req: AppKillRequest):
+    from tools.system import kill_process
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, kill_process, req.pid)
 
 
 # ── Clipboard ─────────────────────────────────────────────────────────────────

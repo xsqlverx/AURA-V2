@@ -25,7 +25,12 @@ AURA is a **multi-threaded daemon** — not a simple script. Three threads run i
 | Voice pipeline | `voice/pipeline.py` | Wake word + PTT + STT + TTS loop |
 | Discord bot | `comms/discord_bot.py` | DM handler, importance classifier |
 
-Socket bridge: TCP port 9001 connects voice pipeline and Discord bot to a separate Next.js UI (`C:\AURA_V2_UI\`).
+Socket bridge: TCP port 9001 connects voice pipeline and Discord bot to the HUD UI (`C:\AURA_V2_UI\`). Two compiled Tauri v2 desktop apps live alongside the Next.js source:
+
+| App | Path | Purpose |
+|-----|------|---------|
+| Desktop EXE | `C:\AURA_V2_UI\aura-desktop\` | Wraps Next.js static export — 1280×800 resizable window, frontend-only |
+| Dynamic Island | `C:\AURA_V2_UI\dynamic-island\` | Frameless transparent always-on-top pill overlay — 3 states (collapsed/expanded/full), WebSocket → AURA backend |
 
 ## LLM Routing
 
@@ -37,11 +42,11 @@ Three providers, three modes (`core/router.py`):
 | `fast` | OpenRouter | `meta-llama/llama-3.1-8b-instruct` | Casual, low-latency |
 | `tools` | Groq | `llama-3.3-70b-versatile` | Function calling |
 
-`needs_tools()` in `core/router.py:51` does keyword-based classification (48+ patterns) to route between conversation and tool paths.
+`needs_tools()` in `core/router.py:51` does keyword-based classification (99 patterns) to route between conversation and tool paths.
 
 ## Tool System
 
-**30+ tools** defined in `tools/registry.py`, dispatched in `core/agent.py:_run_tool()`.
+**31+ tools** defined in `tools/registry.py`, dispatched in `core/agent.py:_run_tool()`.
 
 ### Native Function Format
 
@@ -64,6 +69,15 @@ Regex: `<function=(\w+)[=>\s]*(\{.*?\})?\s*(?:</function>|<function=\1>)`
 
 `open_z_agent` has a 10-second cooldown (`tools/system.py:_last_z_agent_call`) to prevent the LLM from re-calling it in a loop.
 
+## Browser Automation
+
+New in v2: AURA now uses **Playwright** (`tools/browser_agent.py`) instead of brittle PyAutoGUI screen coordinates for browser interactions. A singleton Playwright browser is reused across calls.
+
+| Function | Purpose |
+|----------|---------|
+| `z_agent_submit(prompt)` | Opens `chat.z.ai` in a headed browser, toggles Agent mode via DOM selectors (falls back to coords), types prompt, submits |
+| `scrape_website(url)` | Opens URL in headless browser, waits for JS render, returns visible body text |
+
 ## Key Files
 
 | File | Lines | What it does |
@@ -73,20 +87,23 @@ Regex: `<function=(\w+)[=>\s]*(\{.*?\})?\s*(?:</function>|<function=\1>)`
 | `core/server.py` | 851 | FastAPI app, 20+ endpoints, WebSocket, socket bridge, briefing pipeline |
 | `core/config.py` | 59 | All env vars, model names, memory thresholds |
 | `tools/registry.py` | 50 | Tool schemas (OpenAI function-calling format) |
-| `tools/system.py` | 369 | All system tools (volume, apps, files, clipboard, notes, input, web, z.ai) |
+| `tools/system.py` | 297 | System tools (volume, apps, files, clipboard, notes, input, web) |
+| `tools/browser_agent.py` | 146 | Playwright singleton — `z_agent_submit`, `scrape_website` |
 | `tools/web.py` | 109 | Tavily + DuckDuckGo search, RSS news |
 | `tools/media.py` | 187 | Now-playing detection via Win32 window titles |
 | `voice/pipeline.py` | 598 | Main voice loop: wake word, PTT, STT, TTS, intent intercepts |
 | `voice/tts.py` | 307 | 3 TTS engines: Supertonic, Edge, Kokoro |
 | `memory/chroma_store.py` | 246 | ChromaDB vector store (cosine similarity, dedup, CRUD) |
 | `memory/store.py` | 234 | Curated file memory (USER.md, MEMORY.md, drift detection) |
+| `memory/memory_tool.py` | 128 | Memory agent tool — add, replace, remove, search, list |
 
 ## Platform Constraints
 
 **Windows-only.** Uses:
 - Win32 APIs (`EnumWindows`, `GetWindowTextW`, `GetForegroundWindow`)
 - COM threading (`pycaw`, `comtypes`) for audio control
-- `pyautogui` for keyboard/mouse automation
+- `pyautogui` for keyboard/mouse automation (non-browser tools)
+- `playwright` for browser automation (z.ai + web scraping)
 - `pynput` for global hotkeys and PTT
 
 ## Configuration
@@ -103,7 +120,7 @@ TTS_PROVIDER=        # supertonic | edge | kokoro (default: supertonic)
 TTS_VOICE=           # Engine-specific voice name
 ```
 
-Python 3.14.3. All deps in `requirements.txt` (23 packages).
+Python 3.14.3. All deps in `requirements.txt` (21 packages).
 
 ## Memory System
 
@@ -119,7 +136,7 @@ Memory tool: `memory/memory_tool.py` — actions: add, replace, remove, search, 
 
 ## Testing
 
-`Test.py` — 41 integration tests across 14 categories:
+`Test.py` — 15 integration tests across 14 categories:
 - Audio, Media, Apps, Files, Web, System, Clipboard, Notes, Input, Memory, Z.ai Agent, Briefing, Conversation, Edge Cases
 - Tests hit the `/chat` API endpoint with `stream=True`
 - `SKIP_SHUTDOWN=True` by default (skips dangerous system tests)
@@ -130,7 +147,7 @@ Memory tool: `memory/memory_tool.py` — actions: add, replace, remove, search, 
 - **`_scrub()` strips XML tags** from LLM output — including leaked `<function>` tags
 - **Native function format is text-based** — parser uses regex, not JSON
 - **`needs_tools()` is keyword-based** — can false-positive on casual conversation
-- **Voice pipeline is blocking** — `time.sleep()` in `open_z_agent` blocks the event loop
+- **Voice pipeline is blocking** — `page.wait_for_timeout()` in `z_agent_submit` blocks the event loop
 - **No unit tests** — only integration tests via `Test.py`
 - **No CI/CD** — manual testing only
 - **`_turns_since_memory` is a global** — not thread-safe for concurrent requests

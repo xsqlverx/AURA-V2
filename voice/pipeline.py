@@ -100,6 +100,7 @@ def _send_socket(msg: str):
 def send_state(state: str):   _send_socket(f"STATE:{state}")
 def display_user(text: str):  _send_socket(f"USER:{text}")
 def display_aura(text: str):  _send_socket(f"AURA:{text}")
+def display_briefing_chunk(text: str):  _send_socket(f"BRIEFING_CHUNK:{text}")
 
 
 # ── Keyboard listener ─────────────────────────────────────────────────────────
@@ -231,12 +232,14 @@ def _handle_briefing(tts) -> str:
                 if sentence:
                     send_state("speaking")
                     tts.speak(sentence)
+                    display_briefing_chunk(sentence)
                     full_reply.append(sentence)
             buffer = parts[-1]
 
     if buffer.strip():
         send_state("speaking")
         tts.speak(buffer.strip())
+        display_briefing_chunk(buffer.strip())
         full_reply.append(buffer.strip())
 
     reply = " ".join(full_reply)
@@ -447,6 +450,7 @@ def stream_to_tts(text: str, history: list, tts) -> str:
                 if sentence:
                     send_state("speaking")
                     tts.speak(sentence)
+                    display_briefing_chunk(sentence)
                     full_reply.append(sentence)
             buffer = parts[-1]
         elif len(buffer) > 80:
@@ -457,12 +461,14 @@ def stream_to_tts(text: str, history: list, tts) -> str:
                     if clause:
                         send_state("speaking")
                         tts.speak(clause)
+                        display_briefing_chunk(clause)
                         full_reply.append(clause)
                 buffer = parts[-1]
 
     if buffer.strip():
         send_state("speaking")
         tts.speak(buffer.strip())
+        display_briefing_chunk(buffer.strip())
         full_reply.append(buffer.strip())
 
     reply = " ".join(full_reply)

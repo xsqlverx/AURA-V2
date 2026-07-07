@@ -62,12 +62,33 @@ export async function getHealth() {
   return res.json();
 }
 
-// ── Memory ───────────────────────────────────────────────────────────
+// ── Memory CRUD ──────────────────────────────────────────────────────
 
 export async function getMemory() {
   const res = await request('/memory');
   const data = await res.json();
   return data.entries as { id: string; text: string; metadata?: any }[];
+}
+
+export async function createMemory(text: string) {
+  const res = await request('/memory', {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  });
+  return res.json();
+}
+
+export async function updateMemory(id: string, text: string) {
+  const res = await request(`/memory/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ text }),
+  });
+  return res.json();
+}
+
+export async function deleteMemory(id: string) {
+  const res = await request(`/memory/${id}`, { method: 'DELETE' });
+  return res.json();
 }
 
 // ── System Stats ─────────────────────────────────────────────────────
@@ -179,9 +200,20 @@ export async function launchApp(appName: string) {
   return res.json();
 }
 
-export async function getProcesses(filterPattern?: string) {
-  const qs = filterPattern ? `?filter_pattern=${encodeURIComponent(filterPattern)}` : '';
+export async function getProcesses(filterPattern?: string, excludeSystem: boolean = true) {
+  const params = new URLSearchParams();
+  if (filterPattern) params.set('filter_pattern', filterPattern);
+  if (excludeSystem) params.set('exclude_system', 'true');
+  const qs = params.toString() ? `?${params.toString()}` : '';
   const res = await request(`/apps/processes${qs}`);
+  return res.json();
+}
+
+export async function killProcess(pid: number) {
+  const res = await request('/apps/kill', {
+    method: 'POST',
+    body: JSON.stringify({ pid }),
+  });
   return res.json();
 }
 

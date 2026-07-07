@@ -57,12 +57,22 @@ Integrating Hermes Agent–style memory architecture into AURA v2: behavioral to
 
 **Goal:** Aura identifies automatable tasks and proposes them as "skills" to the user.
 
-### Not Started
-- Skill proposal system: Aura classifies tasks for skill-worthiness
-- Bottom-right slide-in toast with title + description + Approve / Reject buttons
-- Aura decides when to ask (non-blocking, single yes/no proposal prompt)
-- Pending queue for unread proposals
-- Dedicated "Skills" widget (brain icon, 2 tabs) — later
+### Plan
+- **Classification trigger:** After a tool-calling round, the agent evaluates whether the action sequence is repeatable and parameterizable (e.g., "open chrome and type youtube.com" is a repeatable skill)
+- **Detection heuristic:** `core/agent.py` checks if the same tool was called with similar parameters >2 times in a session, or if the user explicitly says "remember this for later"
+- **Proposal flow:**
+  1. Agent drafts a skill name + description + tool sequence
+  2. Pushes via WebSocket (`SKILL_PROPOSAL:{}`) to the frontend
+  3. Frontend shows a bottom-right slide-in toast with title + description + Approve / Reject buttons
+  4. Approved skills save to `data/skills.json` as a new tool schema
+- **Pending queue:** Store unread proposals in `data/skills_pending.json`, exposed via `GET /skills/pending`
+- **Dedicated widget:** "Skills" tab in the UI (separate card, brain icon, shows active + pending proposals)
+
+### Key files
+- `core/agent.py` — detection logic, proposal emission
+- `tools/registry.py` — dynamic skill tool injection
+- `core/server.py` — pending queue endpoints
+- `C:\AURA_V2_UI\src\components\widgets\SkillsWidget.tsx` — frontend
 
 ---
 
@@ -70,10 +80,18 @@ Integrating Hermes Agent–style memory architecture into AURA v2: behavioral to
 
 **Goal:** Remove old code made obsolete by earlier phases.
 
-### Not Started
-- Remove `_turns_since_memory` module variable and nudge block from `core/agent.py` (proactive saves now handled by persona instruction)
-- Remove `forget` action stub from `memory_tool.py` (dead code, not in schema enum)
-- Remove any other dead code identified during audit
+### Plan
+- `core/agent.py:22` — Remove `_turns_since_memory` module variable (global, not thread-safe; proactive saves now handled by persona instruction in `AURA_PERSONA`)
+- `core/agent.py` — Remove the nudge block that checks `_turns_since_memory` every iteration
+- `memory/memory_tool.py:62-64` — Remove `"forget"` action handler stub (returns "not yet implemented"; not in schema enum so LLM never calls it anyway)
+- `tools/registry.py` — Remove `"forget"` from action enum if present in schema descriptions
+- `voice/wake.py` — This entire file is dead code (imports non-existent `WhisperSTT` class from `voice.stt`, not imported anywhere). Either delete or fix with a note pointing to `voice/pipeline.py`'s openwakeword implementation.
+
+### Key files
+- `core/agent.py`
+- `memory/memory_tool.py`
+- `tools/registry.py`
+- `voice/wake.py`
 
 ---
 
@@ -81,11 +99,39 @@ Integrating Hermes Agent–style memory architecture into AURA v2: behavioral to
 
 **Goal:** Full ABC provider pattern for MemoryManager instead of ad-hoc refactor.
 
-### Not Started
-- Define abstract base class / protocol for memory backends
-- Provider implementations (ChromaDB, file-based, etc.)
-- Registration / discovery mechanism
-- Config-based provider selection
+### Plan
+- **Define abstract base class** in `memory/base.py`:
+  ```python
+  from abc import ABC, abstractmethod
+
+  class MemoryProvider(ABC):
+      @abstractmethod
+      def save(self, text: str, metadata: dict | None = None) -> str: ...
+      @abstractmethod
+      def search(self, query: str, limit: int = 5) -> list[dict]: ...
+      @abstractmethod
+      def get_all(self) -> list[dict]: ...
+      @abstractmethod
+      def delete(self, id: str) -> bool: ...
+      @abstractmethod
+      def update(self, id: str, text: str) -> bool: ...
+  ```
+- **Provider implementations:**
+  - `ChromaMemoryProvider` — wraps `chroma_store.py`, persists to `data/chroma/`
+  - `FileMemoryProvider` — wraps `store.py`, uses `data/memories/`
+  - `SQLiteMemoryProvider` — future option for structured queries
+- **Registration mechanism:** `memory/registry.py` — dict-based `{name: class}` mapping, loaded from config
+- **Config-based selection:** Add `MEMORY_PROVIDER` env var to `core/config.py` (options: `"chroma"`, `"file"`, default: `"chroma"`)
+- **Backward compatibility:** `memory/__init__.py` exports a `get_memory()` factory that reads the config and returns the correct provider instance
+- **Migration path:** Existing `chroma_store.save()` calls → `get_memory().save()` — can be done incrementally, one caller at a time
+
+### Key files
+- `memory/base.py` — ABC definition
+- `memory/registry.py` — provider registration
+- `memory/chroma_provider.py` — wraps existing chroma_store
+- `memory/file_provider.py` — wraps existing store
+- `memory/__init__.py` — factory function
+- `core/config.py` — `MEMORY_PROVIDER` env var
 
 ---
 

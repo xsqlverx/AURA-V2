@@ -1,83 +1,95 @@
-import { Text, View, StyleSheet } from 'react-native';
-import { Tabs } from 'expo-router';
-import { useState, useEffect } from 'react';
-import { getHealth, getBaseUrl } from '../../src/api/aura';
-import { colors } from '../../src/theme';
+import { Drawer } from 'expo-router/drawer';
+import { View, Text, StyleSheet } from 'react-native';
+import { DrawerContentScrollView, DrawerItemList } from 'expo-router/drawer';
+import { colors, typography, spacing, radius } from '../../src/theme';
+import { Bot } from 'lucide-react-native';
 
-function ConnectionDot() {
-  const [ok, setOk] = useState<boolean | null>(null);
-  useEffect(() => {
-    const check = async () => {
-      try {
-        await getHealth();
-        setOk(true);
-      } catch { setOk(false); }
-    };
-    check();
-    const iv = setInterval(check, 15000);
-    return () => clearInterval(iv);
-  }, []);
-  if (ok === null) return null;
+function CustomDrawerContent(props: any) {
   return (
-    <View style={[styles.dot, ok ? styles.dotOn : styles.dotOff]} />
+    <View style={styles.container}>
+      {/* Header Profile Section */}
+      <View style={styles.header}>
+        <View style={styles.avatarContainer}>
+          <Bot size={28} color={colors.primary} />
+        </View>
+        <View style={styles.headerTextContainer}>
+          <Text style={styles.title}>AURA</Text>
+          <Text style={styles.subtitle}>Neural Interface</Text>
+        </View>
+      </View>
+
+      {/* Navigation Items */}
+      <DrawerContentScrollView {...props} contentContainerStyle={styles.scrollContainer}>
+        <DrawerItemList {...props} />
+      </DrawerContentScrollView>
+    </View>
   );
 }
 
-export default function TabLayout() {
+export default function Layout() {
   return (
-    <Tabs
+    <Drawer
+      drawerContent={(props) => <CustomDrawerContent {...props} />}
       screenOptions={{
-        headerShown: false,
-        tabBarStyle: {
-          backgroundColor: '#0D1117',
-          borderTopColor: '#21262D',
+        headerShown: true,
+        headerStyle: { backgroundColor: colors.bgDeep },
+        headerTintColor: colors.onSurface,
+        drawerStyle: {
+          backgroundColor: colors.bgDeep,
+          width: 280,
         },
-        tabBarActiveTintColor: '#58A6FF',
-        tabBarInactiveTintColor: '#484F58',
+        drawerActiveTintColor: colors.primary,
+        drawerInactiveTintColor: colors.onSurface,
+        drawerActiveBackgroundColor: colors.glassBg,
+        drawerLabelStyle: {
+          ...typography.bodyMd,
+          marginLeft: -16, // Fixes the awkward default spacing between icon and text
+        },
       }}
-    >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Chat',
-          tabBarIcon: ({ color }: { color: string }) => (
-            <Text style={{ color, fontSize: 18 }}>💬</Text>
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="actions"
-        options={{
-          title: 'Actions',
-          tabBarIcon: ({ color }: { color: string }) => (
-            <Text style={{ color, fontSize: 18 }}>⚡</Text>
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="memory"
-        options={{
-          title: 'Memory',
-          tabBarIcon: ({ color }: { color: string }) => (
-            <Text style={{ color, fontSize: 18 }}>🧠</Text>
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="stats"
-        options={{
-          title: 'Stats',
-          tabBarIcon: ({ color }: { color: string }) => (
-            <Text style={{ color, fontSize: 18 }}>📊</Text>
-          ),
-        }}
-      />
-    </Tabs>
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  dot: { width: 6, height: 6, borderRadius: 3, marginLeft: 8 },
-  dotOn: { backgroundColor: '#3FB950' },
-  dotOff: { backgroundColor: '#F85149' },
+  container: {
+    flex: 1,
+    backgroundColor: colors.bgDeep,
+    paddingTop: 40,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.glassBorder,
+    marginBottom: spacing.md,
+  },
+  avatarContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.card,
+    backgroundColor: colors.glassBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.glassBorder,
+  },
+  headerTextContainer: {
+    marginLeft: spacing.md,
+    justifyContent: 'center',
+  },
+  title: {
+    ...typography.headlineMd,
+    color: colors.onSurface,
+    fontWeight: '700',
+  },
+  subtitle: {
+    ...typography.labelSm,
+    color: colors.primary,
+    opacity: 0.8,
+  },
+  scrollContainer: {
+    paddingTop: 0,
+  },
 });

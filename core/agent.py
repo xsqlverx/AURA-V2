@@ -17,6 +17,7 @@ from memory.store import get_store
 from memory import vault as vault_module
 from tools.registry import TOOLS, TOOL_NAMES
 from tools import system, web
+from tools.browser_agent import scrape_website as scrape_fn
 from tools.study import study as study_fn
 
 logger = logging.getLogger(__name__)
@@ -123,7 +124,14 @@ project, call open_z_agent IMMEDIATELY. Silently elaborate their vague idea
 into a concise directive (what, key features, tech stack), then output
 EXACTLY this and nothing else:
 <function=open_z_agent {"elaborated_prompt":"concise directive here"}<function=open_z_agent>
-No conversation. No plan. Just the tag. SILENT."""
+No conversation. No plan. Just the tag. SILENT.
+
+## Web Scraping
+You have a `scrape_website` tool that opens a URL in a headless browser and
+returns the visible text content. Use this when you need to read information
+from a live website — docs, articles, product pages, etc. Just output:
+<function=scrape_website {"url":"https://example.com/page"}<function=scrape_website>
+Then use the returned content to answer the user's question."""
 
 
 async def _build_system_prompt() -> str:
@@ -209,11 +217,12 @@ async def _run_tool(name: str, args: dict) -> str:
             case "web_search":              result = await web.web_search(args.get("query", ""))
             case "open_website":            result = system.open_website(args.get("url", ""))
             case "open_z_agent":            result = system.open_z_agent(args.get("elaborated_prompt", ""))
+            case "scrape_website":          result = scrape_fn(args.get("url", ""))
             case "get_system_stats":        result = system.get_system_stats()
             case "shutdown":                result = system.shutdown(args.get("delay_seconds", 20))
             case "restart":                 result = system.restart(args.get("delay_seconds", 30))
             case "sleep_pc":                result = system.sleep_pc()
-            case "lock_pc":                 result = system.lock_pc()
+            case "lock_pc" | "lock_screen": result = system.lock_pc()
             case "cancel_shutdown":         result = system.cancel_shutdown()
             case "clipboard_copy":          result = system.clipboard_copy(args.get("text", ""))
             case "clipboard_paste":         result = system.clipboard_paste()

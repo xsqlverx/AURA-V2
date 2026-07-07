@@ -42,7 +42,11 @@ async def get_news_headlines(count: int = 5) -> list[dict]:
 
 
 async def _fetch_rss_headlines(count: int) -> list[dict]:
-    import feedparser
+    try:
+        import feedparser
+    except ImportError:
+        logger.warning("feedparser not installed, skipping RSS fallback")
+        return []
 
     headlines: list[dict] = []
     for feed_url in TAVILY_NEWS_FALLBACK_FEEDS:

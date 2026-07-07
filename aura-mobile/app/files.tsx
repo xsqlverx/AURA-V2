@@ -6,7 +6,8 @@ import {
 import { useFocusEffect } from 'expo-router';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { fileList, fileOpen } from '../src/api/aura';
-import { colors } from '../src/theme';
+import { colors, spacing, radius, typography } from '../src/theme';
+import GlassCard from '../src/components/GlassCard';
 
 type DirEntry = { name: string; isFolder: boolean };
 
@@ -66,12 +67,16 @@ export default function FilesScreen() {
   const renderItem = ({ item, index }: { item: DirEntry; index: number }) => (
     <Animated.View entering={FadeInDown.duration(150).delay(Math.min(index * 20, 200))}>
       <Pressable
-        style={({ pressed }) => [styles.item, pressed && { opacity: 0.7 }]}
+        style={({ pressed }) => [pressed && { opacity: 0.85 }]}
         onPress={() => navigate(item.name, item.isFolder)}
       >
-        <Text style={styles.itemIcon}>{item.isFolder ? '📁' : '📄'}</Text>
-        <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
-        <Text style={styles.itemArrow}>{item.isFolder ? '>' : ''}</Text>
+        <GlassCard>
+          <View style={styles.itemRow}>
+            <Text style={[styles.itemIcon, { color: colors.primary }]}>{item.isFolder ? '⊞' : '⊡'}</Text>
+            <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
+            <Text style={styles.itemArrow}>{item.isFolder ? '>' : ''}</Text>
+          </View>
+        </GlassCard>
       </Pressable>
     </Animated.View>
   );
@@ -87,7 +92,7 @@ export default function FilesScreen() {
         <Text style={styles.headerTitle} numberOfLines={1}>Files</Text>
         <View style={{ width: 60 }} />
       </View>
-      <Text style={styles.pathText} numberOfLines={1}>📁 {path}</Text>
+      <Text style={styles.pathText}>⊞ {path}</Text>
       {error ? (
         <View style={styles.center}><Text style={styles.error}>{error}</Text></View>
       ) : (
@@ -97,7 +102,7 @@ export default function FilesScreen() {
           renderItem={renderItem}
           contentContainerStyle={styles.list}
           refreshControl={
-            <RefreshControl refreshing={loading} onRefresh={() => loadDir(path)} tintColor={colors.accentCyan} colors={[colors.accentCyan]} />
+            <RefreshControl refreshing={loading} onRefresh={() => loadDir(path)} tintColor={colors.primary} colors={[colors.primary]} />
           }
           ListEmptyComponent={
             <View style={styles.center}>
@@ -111,24 +116,23 @@ export default function FilesScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bgPrimary },
+  container: { flex: 1, backgroundColor: colors.bgDeep },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: colors.border,
+    borderBottomWidth: 1, borderBottomColor: colors.glassBorder,
   },
-  headerTitle: { color: colors.accentCyan, fontSize: 18, fontWeight: '700' },
-  backBtn: { color: colors.accentCyan, fontSize: 14, fontWeight: '600' },
-  pathText: { color: colors.textMuted, fontSize: 12, paddingHorizontal: 16, paddingVertical: 8 },
-  list: { padding: 16, gap: 4 },
-  item: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: colors.bgSecondary, borderRadius: 10, padding: 14,
+  headerTitle: { ...typography.headlineMd, color: colors.primary, fontSize: 18 },
+  backBtn: { color: colors.primary, fontSize: 14, fontWeight: '600' },
+  pathText: { ...typography.mono, color: colors.onSurface, paddingHorizontal: 16, paddingVertical: spacing.sm },
+  list: { padding: spacing.lg, gap: spacing.xs },
+  itemRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
   },
   itemIcon: { fontSize: 18 },
-  itemName: { color: colors.textPrimary, fontSize: 14, flex: 1 },
-  itemArrow: { color: colors.textMuted, fontSize: 14 },
+  itemName: { ...typography.bodyMd, color: colors.onSurface, flex: 1 },
+  itemArrow: { color: colors.onSurface, fontSize: 14 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  muted: { color: colors.textMuted, fontSize: 16 },
-  error: { color: colors.accentRed, fontSize: 14 },
+  muted: { color: colors.onSurface, fontSize: 16 },
+  error: { color: colors.error, fontSize: 14 },
 });

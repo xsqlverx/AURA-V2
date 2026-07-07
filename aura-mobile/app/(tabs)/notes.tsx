@@ -1,12 +1,16 @@
 import { useState, useCallback } from 'react';
 import {
-  View, Text, TextInput, FlatList, Pressable, StyleSheet,
-  SafeAreaView, Alert, RefreshControl,
+  View, Text, FlatList, Pressable, StyleSheet,
+  SafeAreaView, Alert, RefreshControl, Platform,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { vaultList, vaultRead, vaultCreate, vaultDelete } from '../src/api/aura';
-import { colors } from '../src/theme';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { vaultList, vaultRead, vaultCreate, vaultDelete } from '../../src/api/aura';
+import { colors, spacing, radius, typography } from '../../src/theme';
+import GlassCard from '../../src/components/GlassCard';
+import GlassButton from '../../src/components/GlassButton';
+import GlassInput from '../../src/components/GlassInput';
 
 type Note = { title: string; path?: string };
 
@@ -63,12 +67,19 @@ export default function NotesScreen() {
   const renderItem = ({ item, index }: { item: Note; index: number }) => (
     <Animated.View entering={FadeInDown.duration(200).delay(Math.min(index * 30, 300))}>
       <Pressable
-        style={({ pressed }) => [styles.noteItem, pressed && { opacity: 0.7 }]}
+        style={({ pressed }) => [pressed && { opacity: 0.85 }]}
         onPress={() => handleRead(item.title)}
         onLongPress={() => handleDelete(item.title)}
       >
-        <Text style={styles.noteTitle} numberOfLines={1}>{item.title}</Text>
-        <Text style={styles.noteArrow}>→</Text>
+        <GlassCard>
+          <View style={styles.noteRow}>
+            <View style={styles.noteIconWrap}>
+              <MaterialIcons name="description" size={18} color={colors.primary} />
+            </View>
+            <Text style={styles.noteTitle} numberOfLines={1}>{item.title}</Text>
+            <MaterialIcons name="chevron-right" size={18} color={colors.onSurfaceMuted} />
+          </View>
+        </GlassCard>
       </Pressable>
     </Animated.View>
   );
@@ -77,14 +88,16 @@ export default function NotesScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <Pressable onPress={() => setSelected(null)}>
-            <Text style={styles.backBtn}>← Back</Text>
+          <Pressable onPress={() => setSelected(null)} style={styles.backBtn}>
+            <MaterialIcons name="arrow-back" size={20} color={colors.primary} />
           </Pressable>
           <Text style={styles.headerTitle} numberOfLines={1}>{selected.title}</Text>
-          <View style={{ width: 60 }} />
+          <View style={{ width: 40 }} />
         </View>
-        <View style={{ padding: 16 }}>
-          <Text style={styles.noteContent}>{selected.content}</Text>
+        <View style={styles.noteContentWrap}>
+          <GlassCard>
+            <Text style={styles.noteContent}>{selected.content}</Text>
+          </GlassCard>
         </View>
       </SafeAreaView>
     );
@@ -93,32 +106,33 @@ export default function NotesScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Notes</Text>
-        <Pressable onPress={() => setCreating(!creating)}>
-          <Text style={styles.addBtn}>{creating ? 'Cancel' : '+ New'}</Text>
+        <View>
+          <Text style={styles.headerTitle}>Notes</Text>
+          <Text style={styles.headerSub}>{notes.length} notes</Text>
+        </View>
+        <Pressable onPress={() => setCreating(!creating)} style={styles.addBtn}>
+          <MaterialIcons name={creating ? 'close' : 'add'} size={20} color="#050505" />
         </Pressable>
       </View>
 
       {creating && (
         <View style={styles.createSection}>
-          <TextInput
+          <GlassInput
             style={styles.createInput}
             value={newTitle}
             onChangeText={setNewTitle}
             placeholder="Note title"
-            placeholderTextColor={colors.textMuted}
           />
-          <TextInput
+          <GlassInput
             style={[styles.createInput, styles.createContent]}
             value={newContent}
             onChangeText={setNewContent}
             placeholder="Note content..."
-            placeholderTextColor={colors.textMuted}
             multiline
           />
-          <Pressable style={styles.createBtn} onPress={handleCreate}>
-            <Text style={styles.createBtnText}>Create Note</Text>
-          </Pressable>
+          <GlassButton variant="primary" onPress={handleCreate}>
+            Create Note
+          </GlassButton>
         </View>
       )}
 
@@ -128,10 +142,12 @@ export default function NotesScreen() {
         renderItem={renderItem}
         contentContainerStyle={styles.list}
         refreshControl={
-          <RefreshControl refreshing={loading} onRefresh={loadNotes} tintColor={colors.accentCyan} colors={[colors.accentCyan]} />
+          <RefreshControl refreshing={loading} onRefresh={loadNotes} tintColor={colors.primary} colors={[colors.primary]} />
         }
+        showsVerticalScrollIndicator={false}
         ListEmptyComponent={
           <View style={styles.empty}>
+            <MaterialIcons name="edit-note" size={40} color={colors.onSurfaceDim} />
             <Text style={styles.emptyText}>{loading ? 'Loading...' : 'No notes yet'}</Text>
           </View>
         }
@@ -141,35 +157,30 @@ export default function NotesScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bgPrimary },
+  container: { flex: 1, backgroundColor: colors.bgDeep },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: colors.border,
+    paddingHorizontal: 20, paddingVertical: 14,
+    borderBottomWidth: 1, borderBottomColor: colors.glassBorder,
   },
-  headerTitle: { color: colors.accentCyan, fontSize: 18, fontWeight: '700', flex: 1, textAlign: 'center' },
-  backBtn: { color: colors.accentCyan, fontSize: 14, fontWeight: '600' },
-  addBtn: { color: colors.accentCyan, fontSize: 14, fontWeight: '600' },
-  list: { padding: 16, gap: 8 },
-  noteItem: {
-    backgroundColor: colors.bgSecondary, borderRadius: 12, padding: 16,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+  headerTitle: { ...typography.headlineMd, color: colors.onSurface, fontSize: 18, letterSpacing: 1 },
+  headerSub: { color: colors.onSurface, fontSize: 11, fontWeight: '500', marginTop: 2 },
+  backBtn: { padding: 6, borderRadius: 8 },
+  addBtn: {
+    backgroundColor: colors.primary, borderRadius: 10,
+    width: 34, height: 34, alignItems: 'center', justifyContent: 'center',
   },
-  noteTitle: { color: colors.textPrimary, fontSize: 14, flex: 1 },
-  noteArrow: { color: colors.textMuted, fontSize: 16 },
-  noteContent: { color: colors.textSecondary, fontSize: 14, lineHeight: 22 },
-  createSection: { padding: 16, gap: 10, borderBottomWidth: 1, borderBottomColor: colors.border },
-  createInput: {
-    backgroundColor: colors.bgSecondary, color: colors.textPrimary,
-    borderRadius: 10, padding: 12, fontSize: 14,
-    borderWidth: 1, borderColor: colors.border,
+  list: { padding: spacing.lg, gap: spacing.sm },
+  noteRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
   },
+  noteIconWrap: { width: 32, height: 32, borderRadius: spacing.sm, backgroundColor: 'rgba(0,242,255,0.12)', alignItems: 'center', justifyContent: 'center' },
+  noteTitle: { ...typography.bodyMd, color: colors.onSurface, fontWeight: '600', flex: 1 },
+  noteContentWrap: { padding: spacing.lg, flex: 1 },
+  noteContent: { ...typography.bodyMd, color: colors.onSurface },
+  createSection: { padding: spacing.lg, gap: 10, borderBottomWidth: 1, borderBottomColor: colors.glassBorder },
+  createInput: {},
   createContent: { minHeight: 80, textAlignVertical: 'top' },
-  createBtn: {
-    backgroundColor: colors.accentCyan, borderRadius: 10,
-    paddingVertical: 12, alignItems: 'center',
-  },
-  createBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  empty: { alignItems: 'center', paddingTop: 80 },
-  emptyText: { color: colors.textMuted, fontSize: 16 },
+  empty: { alignItems: 'center', paddingTop: 80, gap: spacing.sm },
+  emptyText: { color: colors.onSurface, fontSize: 14 },
 });

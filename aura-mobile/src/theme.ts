@@ -1,54 +1,80 @@
-import { StyleSheet } from 'react-native';
+import { Platform } from 'react-native';
 
 export const colors = {
-  bgPrimary: '#0D1117',
-  bgSecondary: '#161B22',
-  bgTertiary: '#21262D',
-  textPrimary: '#F0F6FC',
-  textSecondary: '#8B949E',
-  textMuted: '#484F58',
-  accentCyan: '#58A6FF',
-  accentGreen: '#3FB950',
-  accentOrange: '#D29922',
-  accentRed: '#F85149',
-  accentPurple: '#BC8CFF',
-  border: '#21262D',
+  bgDeep: '#050505',
+  bgPrimary: '#0A0A0A',
+  bgSurface: '#0F0F0F',
+  bgCard: '#141414',
+  onSurface: '#FFFFFF',
+  onSurfaceSecondary: 'rgba(255,255,255,0.7)',
+  onSurfaceMuted: 'rgba(255,255,255,0.4)',
+  onSurfaceDim: 'rgba(255,255,255,0.2)',
+  primary: '#00F2FF',
+  secondary: '#BC8CFF',
+  tertiary: '#3FB950',
+  error: '#FF453A',
+  warning: '#FF9F0A',
+  glassBg: 'rgba(255,255,255,0.05)',
+  glassBorder: 'rgba(255,255,255,0.1)',
+  glassBlur: 40,
+  glowCyan: 'rgba(0,242,255,0.2)',
+  glowPurple: 'rgba(188,140,255,0.2)',
+  glowSpread: 40,
 };
 
-export const theme = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.bgPrimary,
+export const spacing = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 24,
+  xl: 48,
+  xxl: 80,
+};
+
+export const radius = {
+  card: 24,
+  button: 9999,
+  modal: 32,
+  input: 24,
+};
+
+export const typography = {
+  displayLg: {
+    fontFamily: 'PlusJakartaSans_700Bold',
+    fontSize: 64,
+    lineHeight: 72,
+    letterSpacing: -0.04,
   },
-  card: {
-    backgroundColor: colors.bgSecondary,
-    borderRadius: 12,
-    padding: 16,
+  headlineLg: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 40,
+    lineHeight: 48,
+    letterSpacing: -0.02,
   },
-  input: {
-    backgroundColor: colors.bgTertiary,
-    color: colors.textPrimary,
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    fontSize: 15,
+  headlineMd: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 24,
+    lineHeight: 32,
   },
-  text: {
-    color: colors.textPrimary,
-    fontSize: 15,
+  bodyMd: {
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 16,
+    lineHeight: 24,
   },
-  textMuted: {
-    color: colors.textMuted,
+  labelMd: {
+    fontFamily: 'PlusJakartaSans_500Medium',
     fontSize: 14,
+    lineHeight: 20,
+    letterSpacing: 0.05,
+    textTransform: 'uppercase' as const,
   },
-  textAccent: {
-    color: colors.accentCyan,
+  labelSm: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 12,
+    lineHeight: 16,
   },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  mono: {
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontSize: 13,
   },
-  gap8: { gap: 8 },
-  gap16: { gap: 16 },
-  p16: { padding: 16 },
-});
+};

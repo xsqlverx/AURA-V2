@@ -1,0 +1,192 @@
+import { useState, useEffect } from 'react';
+import { View, Text, Pressable, StyleSheet, SafeAreaView, Alert, Platform } from 'react-native';
+import { useRouter } from 'expo-router';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { useSettings } from '../../src/stores/settingsStore';
+import { getHealth } from '../../src/api/aura';
+import { colors, spacing, radius, typography } from '../../src/theme';
+import GlassCard from '../../src/components/GlassCard';
+import GlassButton from '../../src/components/GlassButton';
+import GlassInput from '../../src/components/GlassInput';
+
+export default function SettingsScreen() {
+  const router = useRouter();
+  const { backendUrl, apiKey, save } = useSettings();
+  const [url, setUrl] = useState('');
+  const [key, setKey] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [status, setStatus] = useState<'idle' | 'ok' | 'err'>('idle');
+  const [statusMsg, setStatusMsg] = useState('');
+
+  useEffect(() => {
+    setUrl(backendUrl);
+    setKey(apiKey);
+  }, [backendUrl, apiKey]);
+
+  const handleSave = async () => {
+    if (!url.trim()) { Alert.alert('Error', 'Backend URL is required'); return; }
+    await save(url.trim(), key.trim());
+    Alert.alert('Saved', 'Settings updated');
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    setStatus('idle');
+    setStatusMsg('Testing...');
+    try {
+      await save(url.trim(), key.trim());
+      const data = await getHealth();
+      if (data.status === 'ok') {
+        setStatus('ok');
+        setStatusMsg('Connected!');
+      } else {
+        setStatus('err');
+        setStatusMsg('Unexpected response');
+      }
+    } catch (e: any) {
+      setStatus('err');
+      setStatusMsg(e.message || 'Failed');
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const isConfigured = backendUrl !== 'http://100.100.100.100:8000';
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Settings</Text>
+      </View>
+      <View style={styles.content}>
+        {!isConfigured && (
+          <GlassCard glow="cyan" style={styles.banner}>
+            <View style={styles.bannerRow}>
+              <MaterialIcons name="info-outline" size={18} color={colors.primary} />
+              <Text style={styles.bannerText}>
+                Backend not configured. Enter your Tailscale IP below.
+              </Text>
+            </View>
+          </GlassCard>
+        )}
+
+        <View style={styles.field}>
+          <View style={styles.labelRow}>
+            <MaterialIcons name="dns" size={14} color={colors.onSurfaceMuted} />
+            <Text style={styles.label}>Backend URL</Text>
+          </View>
+          <GlassInput
+            style={styles.input}
+            value={url}
+            onChangeText={setUrl}
+            placeholder="http://100.x.x.x:8000"
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+          />
+          <Text style={styles.hint}>Your PC's Tailscale IP followed by :8000</Text>
+        </View>
+
+        <View style={styles.field}>
+          <View style={styles.labelRow}>
+            <MaterialIcons name="key" size={14} color={colors.onSurfaceMuted} />
+            <Text style={styles.label}>API Key</Text>
+          </View>
+          <GlassInput
+            style={styles.input}
+            value={key}
+            onChangeText={setKey}
+            placeholder="testkey123"
+            autoCapitalize="none"
+            autoCorrect={false}
+            secureTextEntry
+          />
+          <Text style={styles.hint}>Must match MOBILE_API_KEY in .env.local</Text>
+        </View>
+
+        <View style={styles.buttons}>
+          <GlassButton variant="secondary" onPress={handleTest} disabled={testing}>
+            {testing ? 'Testing...' : 'Test'}
+          </GlassButton>
+          <GlassButton variant="primary" onPress={handleSave}>
+            Save
+          </GlassButton>
+        </View>
+
+        {statusMsg ? (
+          <GlassCard
+            style={[
+              styles.statusBanner,
+              status === 'ok' ? { borderColor: colors.tertiary + '30' } : status === 'err' ? { borderColor: colors.error + '30' } : undefined,
+            ]}
+          >
+            <View style={styles.statusRow}>
+              <MaterialIcons
+                name={status === 'ok' ? 'check-circle' : status === 'err' ? 'error' : 'info'}
+                size={16}
+                color={status === 'ok' ? colors.tertiary : status === 'err' ? colors.error : colors.onSurface}
+              />
+              <Text style={[
+                styles.statusText,
+                { color: status === 'ok' ? colors.tertiary : status === 'err' ? colors.error : colors.onSurface },
+              ]}>
+                {statusMsg}
+              </Text>
+            </View>
+          </GlassCard>
+        ) : null}
+
+        <View style={styles.sectionHeader}>
+          <MaterialIcons name="lock" size={16} color={colors.primary} />
+          <Text style={styles.sectionLabel}>SECURITY & PRIVACY</Text>
+        </View>
+        <Pressable
+          style={({ pressed }) => [styles.securityRow, pressed && { opacity: 0.85 }]}
+          onPress={() => router.push('/security')}
+        >
+          <View style={styles.securityLeft}>
+            <MaterialIcons name="fingerprint" size={20} color={colors.primary} />
+            <View>
+              <Text style={styles.securityTitle}>Screen Lock</Text>
+              <Text style={styles.securitySub}>Fingerprint or PIN authentication</Text>
+            </View>
+          </View>
+          <MaterialIcons name="chevron-right" size={18} color={colors.onSurface} />
+        </Pressable>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.bgDeep },
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingVertical: 14,
+    borderBottomWidth: 1, borderBottomColor: colors.glassBorder,
+  },
+  headerTitle: { ...typography.headlineMd, color: colors.onSurface, fontSize: 18, letterSpacing: 1 },
+  content: { padding: spacing.lg, flex: 1, gap: spacing.lg },
+  banner: {},
+  bannerRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  bannerText: { color: colors.onSurface, fontSize: 12, lineHeight: 18, flex: 1 },
+  field: { gap: spacing.sm },
+  labelRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  label: { ...typography.labelSm, color: colors.onSurface },
+  input: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  hint: { color: colors.onSurface, fontSize: 11 },
+  buttons: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.sm },
+  statusBanner: {},
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  statusText: { fontSize: 13, fontWeight: '600' },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: spacing.xs },
+  sectionLabel: { ...typography.labelMd, color: colors.primary },
+  securityRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: colors.glassBg, borderRadius: radius.card,
+    padding: spacing.lg, borderWidth: 1, borderColor: colors.glassBorder,
+  },
+  securityLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  securityTitle: { ...typography.bodyMd, color: colors.onSurface, fontWeight: '600' },
+  securitySub: { ...typography.labelSm, color: colors.onSurface, marginTop: 2 },
+});

@@ -1,9 +1,12 @@
 import { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, SafeAreaView, RefreshControl, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, SafeAreaView, RefreshControl, ScrollView, Platform } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from 'expo-router';
 import Animated, { FadeInDown } from 'react-native-reanimated';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { getStats } from '../../src/api/aura';
-import { colors } from '../../src/theme';
+import { colors, spacing, radius, typography } from '../../src/theme';
+import GlassCard from '../../src/components/GlassCard';
 
 type Stats = {
   cpu_percent?: number;
@@ -14,29 +17,40 @@ type Stats = {
   uptime?: string;
 };
 
-function ProgressBar({ value, color }: { value: number; color: string }) {
+function ProgressBar({ value, delay }: { value: number; delay: number }) {
   return (
     <View style={styles.barTrack}>
-      <Animated.View
-        entering={FadeInDown.duration(400)}
-        style={[styles.barFill, { width: `${Math.min(value, 100)}%`, backgroundColor: color }]}
-      />
+      <Animated.View entering={FadeInDown.duration(400).delay(delay)} style={{ width: '100%' }}>
+        <LinearGradient
+          colors={[colors.secondary, colors.primary]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={[styles.barFill, { width: `${Math.min(value, 100)}%` }]}
+        />
+      </Animated.View>
     </View>
   );
 }
 
 function StatCard({
-  label, value, percent, color, delay,
+  label, value, percent, color, icon, delay,
 }: {
-  label: string; value: string; percent: number; color: string; delay: number;
+  label: string; value: string; percent: number; color: string; icon: string; delay: number;
 }) {
   return (
-    <Animated.View entering={FadeInDown.duration(300).delay(delay)} style={styles.statCard}>
-      <View style={styles.statHeader}>
-        <Text style={styles.statLabel}>{label}</Text>
-        <Text style={[styles.statValue, { color }]}>{value}</Text>
-      </View>
-      <ProgressBar value={percent} color={color} />
+    <Animated.View entering={FadeInDown.duration(300).delay(delay)}>
+      <GlassCard>
+        <View style={styles.statHeader}>
+          <View style={styles.statLeft}>
+            <View style={[styles.statIconWrap, { backgroundColor: color + '12' }]}>
+              <MaterialIcons name={icon as any} size={18} color={color} />
+            </View>
+            <Text style={styles.statLabel}>{label}</Text>
+          </View>
+          <Text style={[styles.statValue, { color }]}>{value}</Text>
+        </View>
+        <ProgressBar value={percent} delay={delay} />
+      </GlassCard>
     </Animated.View>
   );
 }
@@ -65,37 +79,34 @@ export default function StatsScreen() {
     return () => clearInterval(interval);
   }, [load]));
 
-  const cpuColor = (stats?.cpu_percent ?? 0) > 80 ? colors.accentRed
-    : (stats?.cpu_percent ?? 0) > 50 ? colors.accentOrange : colors.accentGreen;
+  const cpuColor = (stats?.cpu_percent ?? 0) > 80 ? colors.error
+    : (stats?.cpu_percent ?? 0) > 50 ? colors.warning : colors.primary;
 
-  const ramColor = (stats?.ram_percent ?? 0) > 80 ? colors.accentRed
-    : (stats?.ram_percent ?? 0) > 50 ? colors.accentOrange : colors.accentCyan;
+  const ramColor = (stats?.ram_percent ?? 0) > 80 ? colors.error
+    : (stats?.ram_percent ?? 0) > 50 ? colors.warning : colors.secondary;
 
-  const diskColor = (stats?.disk_percent ?? 0) > 90 ? colors.accentRed
-    : (stats?.disk_percent ?? 0) > 70 ? colors.accentOrange : colors.accentGreen;
+  const diskColor = (stats?.disk_percent ?? 0) > 90 ? colors.error
+    : (stats?.disk_percent ?? 0) > 70 ? colors.warning : '#2DD4A8';
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>System Stats</Text>
-        <View style={styles.liveDot}>
-          <View style={styles.dot} />
-          <Text style={styles.liveText}>Live</Text>
+        <View style={styles.livePill}>
+          <View style={[styles.liveDot, { backgroundColor: colors.tertiary }]} />
+          <Text style={[styles.liveText, { color: colors.tertiary }]}>Live</Text>
         </View>
       </View>
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={
-          <RefreshControl
-            refreshing={loading && !stats}
-            onRefresh={load}
-            tintColor={colors.accentCyan}
-            colors={[colors.accentCyan]}
-          />
+          <RefreshControl refreshing={loading && !stats} onRefresh={load} tintColor={colors.primary} colors={[colors.primary]} />
         }
+        showsVerticalScrollIndicator={false}
       >
         {error && !stats ? (
           <View style={styles.center}>
+            <MaterialIcons name="error-outline" size={32} color={colors.error} />
             <Text style={styles.error}>{error}</Text>
           </View>
         ) : stats ? (
@@ -105,6 +116,7 @@ export default function StatsScreen() {
               value={`${stats.cpu_percent ?? '?'}%`}
               percent={stats.cpu_percent ?? 0}
               color={cpuColor}
+              icon="memory"
               delay={0}
             />
             <StatCard
@@ -112,6 +124,7 @@ export default function StatsScreen() {
               value={`${stats.ram_percent ?? '?'}%`}
               percent={stats.ram_percent ?? 0}
               color={ramColor}
+              icon="storage"
               delay={60}
             />
             <StatCard
@@ -119,6 +132,7 @@ export default function StatsScreen() {
               value={`${stats.disk_percent ?? '?'}%`}
               percent={stats.disk_percent ?? 0}
               color={diskColor}
+              icon="hard-drive"
               delay={120}
             />
             {stats.battery_percent != null && (
@@ -126,19 +140,30 @@ export default function StatsScreen() {
                 label="Battery"
                 value={`${stats.battery_percent}%${stats.power_plugged ? ' ⚡' : ''}`}
                 percent={stats.battery_percent}
-                color={stats.battery_percent < 20 ? colors.accentRed : colors.accentGreen}
+                color={stats.battery_percent < 20 ? colors.error : colors.tertiary}
+                icon="battery-full"
                 delay={180}
               />
             )}
             {stats.uptime && (
-              <Animated.View entering={FadeInDown.duration(300).delay(240)} style={styles.uptimeCard}>
-                <Text style={styles.uptimeLabel}>Uptime</Text>
-                <Text style={styles.uptimeValue}>{stats.uptime}</Text>
+              <Animated.View entering={FadeInDown.duration(300).delay(240)}>
+                <GlassCard>
+                  <View style={styles.uptimeRow}>
+                    <View style={styles.uptimeIcon}>
+                      <MaterialIcons name="schedule" size={18} color="#2DD4A8" />
+                    </View>
+                    <View>
+                      <Text style={styles.uptimeLabel}>Uptime</Text>
+                      <Text style={styles.uptimeValue}>{stats.uptime}</Text>
+                    </View>
+                  </View>
+                </GlassCard>
               </Animated.View>
             )}
           </>
         ) : (
           <View style={styles.center}>
+            <MaterialIcons name="hourglass-empty" size={32} color={colors.onSurfaceDim} />
             <Text style={styles.muted}>Loading...</Text>
           </View>
         )}
@@ -148,36 +173,33 @@ export default function StatsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bgPrimary },
+  container: { flex: 1, backgroundColor: colors.bgDeep },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: colors.border,
+    paddingHorizontal: 20, paddingVertical: 14,
+    borderBottomWidth: 1, borderBottomColor: colors.glassBorder,
   },
-  headerTitle: { color: colors.accentCyan, fontSize: 20, fontWeight: '700' },
-  liveDot: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.accentGreen },
-  liveText: { color: colors.accentGreen, fontSize: 12, fontWeight: '600' },
-  content: { padding: 16, gap: 12 },
-  statCard: {
-    backgroundColor: colors.bgSecondary, borderRadius: 14, padding: 16,
-  },
+  headerTitle: { ...typography.headlineMd, color: colors.onSurface, fontSize: 18, letterSpacing: 1 },
+  livePill: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(63,185,80,0.08)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  liveDot: { width: 6, height: 6, borderRadius: 3 },
+  liveText: { fontSize: 11, fontWeight: '700' },
+  content: { padding: spacing.lg, gap: spacing.md },
   statHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md,
   },
-  statLabel: { color: colors.textSecondary, fontSize: 15, fontWeight: '500' },
-  statValue: { fontSize: 22, fontWeight: '700' },
+  statLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  statIconWrap: { width: 32, height: 32, borderRadius: spacing.sm, alignItems: 'center', justifyContent: 'center' },
+  statLabel: { ...typography.bodyMd, color: colors.primary, fontWeight: '600' },
+  statValue: { ...typography.displayLg, fontSize: 22 },
   barTrack: {
-    height: 6, borderRadius: 3, backgroundColor: colors.bgTertiary, overflow: 'hidden',
+    height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.05)', overflow: 'hidden',
   },
   barFill: { height: '100%', borderRadius: 3 },
-  uptimeCard: {
-    backgroundColor: colors.bgSecondary, borderRadius: 14, padding: 16,
-    alignItems: 'center',
-  },
-  uptimeLabel: { color: colors.textMuted, fontSize: 12, marginBottom: 4 },
-  uptimeValue: { color: colors.textSecondary, fontSize: 14, fontWeight: '600' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  muted: { color: colors.textMuted, fontSize: 16 },
-  error: { color: colors.accentRed, fontSize: 14 },
+  uptimeRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  uptimeIcon: { width: 32, height: 32, borderRadius: spacing.sm, backgroundColor: 'rgba(45,212,168,0.12)', alignItems: 'center', justifyContent: 'center' },
+  uptimeLabel: { ...typography.labelSm, color: colors.primary, marginBottom: 2 },
+  uptimeValue: { ...typography.mono, color: colors.onSurface },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: spacing.sm, paddingTop: 80 },
+  muted: { color: colors.onSurface, fontSize: 14 },
+  error: { color: colors.error, fontSize: 13 },
 });

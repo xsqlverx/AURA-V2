@@ -1,11 +1,16 @@
 import { useState, useCallback } from 'react';
 import {
-  View, Text, FlatList, StyleSheet, SafeAreaView, RefreshControl,
+  View, Text, FlatList, Pressable, StyleSheet,
+  SafeAreaView, RefreshControl, Alert, Modal, Platform,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { getMemory } from '../../src/api/aura';
-import { colors } from '../../src/theme';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { getMemory, createMemory, updateMemory, deleteMemory } from '../../src/api/aura';
+import { colors, spacing, radius, typography } from '../../src/theme';
+import GlassCard from '../../src/components/GlassCard';
+import GlassButton from '../../src/components/GlassButton';
+import GlassInput from '../../src/components/GlassInput';
 
 type MemoryEntry = { id: string; text: string; metadata?: any };
 
@@ -13,6 +18,10 @@ export default function MemoryScreen() {
   const [entries, setEntries] = useState<MemoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showCreate, setShowCreate] = useState(false);
+  const [newText, setNewText] = useState('');
+  const [editEntry, setEditEntry] = useState<MemoryEntry | null>(null);
+  const [editText, setEditText] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -29,28 +38,132 @@ export default function MemoryScreen() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
+  const handleCreate = async () => {
+    if (!newText.trim()) return;
+    try {
+      await createMemory(newText.trim());
+      setNewText('');
+      setShowCreate(false);
+      load();
+    } catch (e: any) { Alert.alert('Error', e.message); }
+  };
+
+  const handleUpdate = async () => {
+    if (!editEntry || !editText.trim()) return;
+    try {
+      await updateMemory(editEntry.id, editText.trim());
+      setEditEntry(null);
+      setEditText('');
+      load();
+    } catch (e: any) { Alert.alert('Error', e.message); }
+  };
+
+  const handleDelete = (item: MemoryEntry) => {
+    Alert.alert('Delete Memory', 'Remove this memory entry?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive',
+        onPress: async () => {
+          try { await deleteMemory(item.id); load(); }
+          catch (e: any) { Alert.alert('Error', e.message); }
+        },
+      },
+    ]);
+  };
+
   const renderItem = ({ item, index }: { item: MemoryEntry; index: number }) => (
-    <Animated.View
-      entering={FadeInDown.duration(200).delay(Math.min(index * 30, 300))}
-      style={styles.card}
-    >
-      <Text style={styles.text} numberOfLines={3}>{item.text}</Text>
-      {item.metadata?.timestamp && (
-        <Text style={styles.timestamp}>
-          {new Date(item.metadata.timestamp * 1000).toLocaleString()}
-        </Text>
-      )}
+    <Animated.View entering={FadeInDown.duration(200).delay(Math.min(index * 30, 300))}>
+      <Pressable
+        style={({ pressed }) => [pressed && { opacity: 0.85 }]}
+        onPress={() => { setEditEntry(item); setEditText(item.text); }}
+        onLongPress={() => handleDelete(item)}
+      >
+        <GlassCard>
+          <View style={styles.cardHeader}>
+            <View style={styles.cardIcon}>
+              <MaterialIcons name="psychology" size={14} color={colors.secondary} />
+            </View>
+            {item.metadata?.timestamp && (
+              <Text style={styles.timestamp}>
+                {new Date(item.metadata.timestamp * 1000).toLocaleDateString()}
+              </Text>
+            )}
+          </View>
+          <Text style={styles.text} numberOfLines={3}>{item.text}</Text>
+        </GlassCard>
+      </Pressable>
     </Animated.View>
   );
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Memory</Text>
-        <Text style={styles.count}>{entries.length} entries</Text>
+        <View>
+          <Text style={styles.headerTitle}>Memory</Text>
+          <Text style={styles.headerSub}>{entries.length} entries</Text>
+        </View>
+        <Pressable onPress={() => setShowCreate(true)} style={styles.addBtn}>
+          <MaterialIcons name="add" size={20} color="#050505" />
+        </Pressable>
       </View>
+
+      <Modal visible={showCreate} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <GlassCard style={styles.modal}>
+            <View style={styles.modalHeader}>
+              <MaterialIcons name="add-circle" size={20} color={colors.primary} />
+              <Text style={styles.modalTitle}>New Memory</Text>
+            </View>
+            <GlassInput
+              style={styles.modalInput}
+              value={newText}
+              onChangeText={setNewText}
+              placeholder="Enter memory..."
+              multiline
+              autoFocus
+            />
+            <View style={styles.modalBtns}>
+              <GlassButton variant="secondary" onPress={() => { setShowCreate(false); setNewText(''); }}>
+                Cancel
+              </GlassButton>
+              <GlassButton variant="primary" onPress={handleCreate}>
+                Save
+              </GlassButton>
+            </View>
+          </GlassCard>
+        </View>
+      </Modal>
+
+      <Modal visible={!!editEntry} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <GlassCard style={styles.modal}>
+            <View style={styles.modalHeader}>
+              <MaterialIcons name="edit" size={20} color={colors.primary} />
+              <Text style={styles.modalTitle}>Edit Memory</Text>
+            </View>
+            <GlassInput
+              style={styles.modalInput}
+              value={editText}
+              onChangeText={setEditText}
+              placeholder="Edit memory..."
+              multiline
+              autoFocus
+            />
+            <View style={styles.modalBtns}>
+              <GlassButton variant="secondary" onPress={() => setEditEntry(null)}>
+                Cancel
+              </GlassButton>
+              <GlassButton variant="primary" onPress={handleUpdate}>
+                Update
+              </GlassButton>
+            </View>
+          </GlassCard>
+        </View>
+      </Modal>
+
       {error && !loading ? (
         <View style={styles.center}>
+          <MaterialIcons name="error-outline" size={32} color={colors.error} />
           <Text style={styles.error}>{error}</Text>
           <Text style={styles.retry} onPress={load}>Retry</Text>
         </View>
@@ -61,18 +174,13 @@ export default function MemoryScreen() {
           renderItem={renderItem}
           contentContainerStyle={styles.list}
           refreshControl={
-            <RefreshControl
-              refreshing={loading}
-              onRefresh={load}
-              tintColor={colors.accentCyan}
-              colors={[colors.accentCyan]}
-            />
+            <RefreshControl refreshing={loading} onRefresh={load} tintColor={colors.primary} colors={[colors.primary]} />
           }
+          showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <View style={styles.center}>
-              <Text style={styles.muted}>
-                {loading ? 'Loading memories...' : 'No memories yet'}
-              </Text>
+              <MaterialIcons name="psychology" size={40} color={colors.onSurfaceDim} />
+              <Text style={styles.muted}>{loading ? 'Loading memories...' : 'No memories yet'}</Text>
             </View>
           }
         />
@@ -82,22 +190,34 @@ export default function MemoryScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bgPrimary },
+  container: { flex: 1, backgroundColor: colors.bgDeep },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: colors.border,
+    paddingHorizontal: 20, paddingVertical: 14,
+    borderBottomWidth: 1, borderBottomColor: colors.glassBorder,
   },
-  headerTitle: { color: colors.accentCyan, fontSize: 20, fontWeight: '700' },
-  count: { color: colors.textMuted, fontSize: 13 },
-  list: { padding: 16, gap: 8 },
-  card: {
-    backgroundColor: colors.bgSecondary, borderRadius: 12, padding: 14, gap: 4,
+  headerTitle: { ...typography.headlineMd, color: colors.onSurface, fontSize: 18, letterSpacing: 1 },
+  headerSub: { color: colors.onSurface, fontSize: 11, fontWeight: '500', marginTop: 2 },
+  addBtn: {
+    backgroundColor: colors.primary, borderRadius: 10,
+    width: 34, height: 34, alignItems: 'center', justifyContent: 'center',
   },
-  text: { color: colors.textPrimary, fontSize: 14, lineHeight: 20 },
-  timestamp: { color: colors.textMuted, fontSize: 11, marginTop: 4 },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 8 },
-  muted: { color: colors.textMuted, fontSize: 16 },
-  error: { color: colors.accentRed, fontSize: 14 },
-  retry: { color: colors.accentCyan, fontSize: 14, marginTop: 4 },
+  list: { padding: spacing.lg, gap: spacing.sm },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  cardIcon: { width: 24, height: 24, borderRadius: 6, backgroundColor: 'rgba(188,140,255,0.12)', alignItems: 'center', justifyContent: 'center' },
+  text: { ...typography.bodyMd, color: colors.onSurface },
+  timestamp: { ...typography.mono, color: colors.onSurface },
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.75)',
+    justifyContent: 'center', padding: spacing.xl,
+  },
+  modal: { padding: spacing.lg },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.lg },
+  modalTitle: { ...typography.headlineMd, color: colors.onSurface, fontSize: 16 },
+  modalInput: { minHeight: 80, textAlignVertical: 'top' },
+  modalBtns: { flexDirection: 'row', gap: 10, marginTop: spacing.lg },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: spacing.sm, paddingTop: 80 },
+  muted: { color: colors.onSurface, fontSize: 14 },
+  error: { color: colors.error, fontSize: 13 },
+  retry: { color: colors.primary, fontSize: 13, marginTop: 4 },
 });

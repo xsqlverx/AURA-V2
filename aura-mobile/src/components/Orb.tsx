@@ -22,10 +22,10 @@ type OrbProps = {
 
 const STATE_CONFIG = {
   disconnected: { duration: 2500, spread: 0.3, color1: '#3A1A1A', color2: '#6B1F1F' },
-  idle:         { duration: 1500, spread: 0.4, color1: '#1A3A5C', color2: '#1F4F7B' },
-  listening:    { duration: 1000, spread: 0.6, color1: '#1A4F6B', color2: '#1F6FEB' },
-  thinking:     { duration: 600,  spread: 0.8, color1: '#2A1A6B', color2: '#4F6FEB' },
-  speaking:     { duration: 400,  spread: 1.0, color1: '#1F6FEB', color2: '#58A6FF' },
+  idle:         { duration: 1500, spread: 0.4, color1: '#0A1A2A', color2: '#0F2A4A' },
+  listening:    { duration: 1000, spread: 0.6, color1: '#0A2A3A', color2: '#005F7F' },
+  thinking:     { duration: 600,  spread: 0.8, color1: '#1A0A3A', color2: '#5A3FBF' },
+  speaking:     { duration: 400,  spread: 1.0, color1: '#005F7F', color2: '#00F2FF' },
 };
 
 export default function Orb({ active = false, orState, size = 80 }: OrbProps) {
@@ -36,7 +36,6 @@ export default function Orb({ active = false, orState, size = 80 }: OrbProps) {
   const stateTransition = useSharedValue(0);
   const prevStateRef = useMemo(() => ({ current: 'idle' }), []);
 
-  // Pulse loop — speed changes with state
   useEffect(() => {
     cancelAnimation(pulse);
     pulse.value = withRepeat(
@@ -49,7 +48,6 @@ export default function Orb({ active = false, orState, size = 80 }: OrbProps) {
     );
   }, [state]);
 
-  // Smooth state transition
   useEffect(() => {
     stateTransition.value = withTiming(1, { duration: 300 });
     prevStateRef.current = state;
@@ -69,15 +67,10 @@ export default function Orb({ active = false, orState, size = 80 }: OrbProps) {
 
   const ringStyle = (multiplier: number) => useAnimatedStyle(() => {
     const scale = 1 + pulse.value * 0.3 * config.spread * multiplier;
-    const opacity = interpolateColor(
-      pulse.value,
-      [0, 1],
-      [config.color1.replace(')', ',0.06)').replace(/rgb\(\d+,\d+,\d+\)/, `rgba(88,166,255,0.06)`),
-       config.color2.replace(')', ',0.2)').replace(/rgb\(\d+,\d+,\d+\)/, `rgba(88,166,255,0.2)`)]
-    );
+    const borderOpacity = 0.06 + pulse.value * 0.14;
     return {
       transform: [{ scale }],
-      borderColor: opacity,
+      borderColor: `rgba(0,242,255,${borderOpacity})`,
     };
   });
 
@@ -122,10 +115,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: 'rgba(88,166,255,0.08)',
+    borderColor: 'rgba(0,242,255,0.08)',
   },
   core: {
-    shadowColor: colors.accentCyan,
+    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.4,
     shadowRadius: 12,

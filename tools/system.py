@@ -3,6 +3,7 @@
 import os
 import subprocess
 import threading
+import time
 import webbrowser
 import logging
 from pathlib import Path
@@ -100,17 +101,57 @@ def launch_app(app_name: str) -> dict:
         logger.error("launch_app failed: %s", e)
         return {"error": str(e)}
 
-def list_running_processes(filter_pattern: str = None) -> dict:
+SYSTEM_PROC_NAMES = {
+    "svchost.exe", "system", "system idle process", "registry",
+    "smss.exe", "csrss.exe", "wininit.exe", "winlogon.exe",
+    "services.exe", "lsass.exe", "lsm.exe", "svchost.exe",
+    "fontdrvhost.exe", "dwm.exe", "conhost.exe",
+    "runtimebroker.exe", "securityhealthservice.exe",
+    "sihost.exe", "taskhostw.exe", "ctfmon.exe",
+    "startmenuexperiencehost.exe", "searchapp.exe",
+    "widgets.exe", "widgetservice.exe",
+    "ntoskrnl.exe", "hal.dll", "ntdll.dll",
+    "windows.internal.shellcommon.dll",
+    "shellexperiencehost.exe",
+    "systemsettings.exe", "lockapp.exe", "applicationframehost.exe",
+    "backgroundtaskhost.exe", "userinit.exe",
+    "wmiprvse.exe", "spoolsv.exe", "wlms.exe",
+    "sppsvc.exe", "trustedinstaller.exe",
+}
+
+def list_running_processes(filter_pattern: str = None, exclude_system: bool = True) -> dict:
     try:
         procs = []
         for p in psutil.process_iter(["pid", "name"]):
             try:
                 name = p.info["name"]
+                if exclude_system and name.lower() in SYSTEM_PROC_NAMES:
+                    continue
                 if filter_pattern is None or filter_pattern.lower() in name.lower():
-                    procs.append(f"{name} (PID: {p.info['pid']})")
+                    procs.append({"pid": p.info["pid"], "name": name})
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
+        procs.sort(key=lambda x: x["name"].lower())
         return {"processes": procs, "count": len(procs)}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def kill_process(pid: int) -> dict:
+    try:
+        p = psutil.Process(pid)
+        name = p.name()
+        p.terminate()
+        p.wait(timeout=3)
+        return {"success": True, "terminated": name, "pid": pid}
+    except psutil.TimeoutExpired:
+        try:
+            p.kill()
+            return {"success": True, "killed": name, "pid": pid}
+        except Exception as e:
+            return {"error": f"Force kill failed: {e}"}
+    except psutil.NoSuchProcess:
+        return {"error": "Process not found"}
     except Exception as e:
         return {"error": str(e)}
 
@@ -155,33 +196,17 @@ def list_directory(dir_path: str = ".") -> dict:
 
 # ── Web ───────────────────────────────────────────────────────────────────────
 
-Z_AGENT_TOGGLE = (110, 250)
-Z_CHAT_INPUT   = (889, 571)
 _last_z_agent_call = 0.0
 _z_lock = threading.Lock()
 
 def open_z_agent(elaborated_prompt: str) -> dict:
-    import pyautogui, webbrowser, time
+    from tools.browser_agent import z_agent_submit
     global _last_z_agent_call
-    try:
-        with _z_lock:
-            if time.time() - _last_z_agent_call < 10:
-                return {"success": True, "already_called": True}
-            _last_z_agent_call = time.time()
-        webbrowser.open("https://chat.z.ai")
-        time.sleep(4)
-        pyautogui.hotkey('f11')
-        time.sleep(1)
-        pyautogui.click(*Z_AGENT_TOGGLE)
-        time.sleep(0.5)
-        pyautogui.click(*Z_CHAT_INPUT)
-        time.sleep(0.3)
-        pyautogui.write(elaborated_prompt, interval=0.015)
-        time.sleep(0.2)
-        pyautogui.press('enter')
-        return {"success": True, "submitted": elaborated_prompt[:80] + "..."}
-    except Exception as e:
-        return {"error": str(e)}
+    with _z_lock:
+        if time.time() - _last_z_agent_call < 10:
+            return {"success": True, "already_called": True}
+        _last_z_agent_call = time.time()
+    return z_agent_submit(elaborated_prompt)
 
 def open_website(url: str) -> dict:
     try:
