@@ -227,6 +227,15 @@ async def lifespan(app: FastAPI):
     # Start Dynamic Island scheduler
     _start_di_scheduler()
 
+    # Pre-load Whisper model so first STT request is instant
+    try:
+        from voice.stt import load_whisper
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, lambda: load_whisper("tiny"))
+        logger.info("Whisper model pre-loaded.")
+    except Exception as e:
+        logger.warning("Whisper pre-load failed: %s", e)
+
     yield
     logger.info("Aura backend shutting down.")
 
@@ -1155,9 +1164,8 @@ async def speech_to_text(file: UploadFile = File(...)):
         tmp.write(content)
         tmp.close()
 
-        from voice.stt import load_whisper, transcribe
+        from voice.stt import transcribe
         loop = asyncio.get_running_loop()
-        whisper = await loop.run_in_executor(None, lambda: load_whisper("tiny"))
         text = await loop.run_in_executor(None, transcribe, tmp.name)
         return {"text": text, "success": bool(text)}
     except Exception as e:
@@ -1184,9 +1192,8 @@ async def speech_to_text_raw(request: Request):
         tmp.write(body)
         tmp.close()
 
-        from voice.stt import load_whisper, transcribe
+        from voice.stt import transcribe
         loop = asyncio.get_running_loop()
-        whisper = await loop.run_in_executor(None, lambda: load_whisper("tiny"))
         text = await loop.run_in_executor(None, transcribe, tmp.name)
         return {"text": text, "success": bool(text)}
     except Exception as e:
@@ -1216,9 +1223,8 @@ async def speech_to_text_base64(req: STTBase64Request):
         tmp.write(raw)
         tmp.close()
 
-        from voice.stt import load_whisper, transcribe
+        from voice.stt import transcribe
         loop = asyncio.get_running_loop()
-        whisper = await loop.run_in_executor(None, lambda: load_whisper("tiny"))
         text = await loop.run_in_executor(None, transcribe, tmp.name)
         return {"text": text, "success": bool(text)}
     except Exception as e:

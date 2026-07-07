@@ -12,15 +12,14 @@ import threading
 
 import numpy as np
 import sounddevice as sd
-import requests
 
-from core.config import SERVER_URL, UI_SOCKET_PORT
+from core.config import UI_SOCKET_PORT
 
 logger = logging.getLogger(__name__)
 
 SAMPLE_RATE    = 16000
 CHUNK_SIZE     = 1280
-SILENCE_SECS   = 1.2
+SILENCE_SECS   = 0.8
 SPEECH_THRESH  = 300
 WAKE_MODEL     = "hey_jarvis"
 DETECT_THRESH  = 0.5
@@ -417,54 +416,34 @@ def _handle_voice_switch(tts, user_text: str) -> None:
 
 # ── Chat → TTS stream ─────────────────────────────────────────────────────────
 
-def stream_to_tts(text: str, history: list, tts) -> str:
+async def _stream_to_tts_async(text: str, history: list, tts) -> str:
+    """Async: calls agent.run() directly (no HTTP loopback) and feeds TTS phrase-by-phrase."""
+    from core.agent import run
     history.append({"role": "user", "content": text})
     past = [m for m in history[:-1] if m["role"] != "system"]
 
-    try:
-        resp = requests.post(
-            f"{SERVER_URL}/chat",
-            json={"message": text, "history": past, "speak": False},
-            stream=True,
-            timeout=120,
-        )
-        resp.raise_for_status()
-    except Exception as e:
-        logger.error("Chat request failed: %s", e)
-        return ""
-
     buffer = ""
     full_reply = []
-    sentence_end = re.compile(r"(?<=[.!?])\s+")
-    clause_break = re.compile(r"(?<=[,;:])\s+")
 
-    for chunk in resp.iter_content(chunk_size=None, decode_unicode=True):
+    async for chunk in run(text, past):
         if not chunk:
             continue
         buffer += chunk
 
-        parts = sentence_end.split(buffer)
-        if len(parts) > 1:
-            for sentence in parts[:-1]:
-                sentence = sentence.strip()
-                if sentence:
-                    send_state("speaking")
-                    tts.speak(sentence)
-                    display_briefing_chunk(sentence)
-                    full_reply.append(sentence)
-            buffer = parts[-1]
-        elif len(buffer) > 80:
-            parts = clause_break.split(buffer)
-            if len(parts) > 1:
-                for clause in parts[:-1]:
-                    clause = clause.strip()
-                    if clause:
-                        send_state("speaking")
-                        tts.speak(clause)
-                        display_briefing_chunk(clause)
-                        full_reply.append(clause)
-                buffer = parts[-1]
+        # Feed TTS aggressively — every ~40+ chars split on last space
+        while len(buffer) > 40:
+            last_space = buffer.rfind(" ", 0, -1)
+            if last_space < 20:
+                break
+            phrase = buffer[:last_space]
+            buffer = buffer[last_space + 1:]
+            if phrase.strip():
+                send_state("speaking")
+                tts.speak(phrase.strip())
+                display_briefing_chunk(phrase.strip())
+                full_reply.append(phrase.strip())
 
+    # Flush remaining buffer
     if buffer.strip():
         send_state("speaking")
         tts.speak(buffer.strip())
@@ -478,6 +457,16 @@ def stream_to_tts(text: str, history: list, tts) -> str:
     if len(history) > 20:
         history[:] = history[-20:]
     return reply
+
+
+def stream_to_tts(text: str, history: list, tts) -> str:
+    """Sync wrapper — runs the async version in a new event loop on this thread."""
+    import asyncio
+    try:
+        return asyncio.run(_stream_to_tts_async(text, history, tts))
+    except Exception as e:
+        logger.error("stream_to_tts failed: %s", e)
+        return ""
 
 
 # ── Session ───────────────────────────────────────────────────────────────────

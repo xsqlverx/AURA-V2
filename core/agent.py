@@ -1,4 +1,11 @@
-"""Agent loop — receive message, call LLM, run tools if needed, respond."""
+"""Agent loop — classify intent, route to provider, run tools if needed, respond.
+
+Four-provider architecture:
+  Classifier:   Gemini 1.5 Flash  → TRUE (tools needed) or FALSE (conversation)
+  Conversation: OpenRouter         → no tools, no web
+  Tools:        Groq Llama 3.3    → native <function=name> tool execution
+  Research:     Mistral Small      → deep summarization after tool loop
+"""
 
 import json
 import logging
@@ -9,7 +16,7 @@ from pathlib import Path
 from typing import AsyncIterator
 
 from core.config import MEMORY_AUTOSAVE_INTERVAL
-from core.router import get_client_and_model, needs_tools
+from core.router import classify_intent, get_client_and_model
 from memory import chroma_store
 from memory.context import get_context_block
 from memory.memory_tool import handle_memory_tool
@@ -42,9 +49,10 @@ def _parse_native_function(text: str) -> list[dict]:
     """Parse Llama-style <function=name {...} </function> patterns from text.
     Returns [{"name": str, "arguments": dict, "full_match": str}, ...]."""
     calls = []
-    # Handles: <function=name>JSON<function=name>, <function=name JSON </function>,
-    #          <function=name={JSON}</function>, <function=name<function=name> (no args)
-    for m in re.finditer(r'<function=(\w+)[=>\s]*(\{.*?\})?\s*(?:</function>|<function=\1>)', text, re.DOTALL):
+    for m in re.finditer(
+        r'<function=(\w+)[=>\s]*(\{.*?\})?\s*(?:</function>|<function=\1>)',
+        text, re.DOTALL,
+    ):
         name = m.group(1)
         raw = m.group(2)
         if raw:
@@ -58,9 +66,12 @@ def _parse_native_function(text: str) -> list[dict]:
         calls.append({"name": name, "arguments": args, "full_match": m.group(0)})
     return calls
 
-# ── System Prompt ─────────────────────────────────────────────────────────────
 
-AURA_PERSONA = """You are Aura, a local AI assistant and personal companion. \
+# ── System Prompts ────────────────────────────────────────────────────────────
+# Two personas — TOOLS (Groq with <function=name> format) and CONVO (OpenRouter,
+# no tools, no web). The router selects which one to use based on classify_intent().
+
+AURA_PERSONA_TOOLS = """You are Aura, a local AI assistant and personal companion. \
 You are sharp, warm, and direct — never robotic. You run entirely on the user's \
 machine, so privacy is guaranteed. You have access to tools for controlling the PC, \
 searching the web, and checking system stats. Use tools when they are clearly needed; \
@@ -133,13 +144,27 @@ from a live website — docs, articles, product pages, etc. Just output:
 <function=scrape_website {"url":"https://example.com/page"}<function=scrape_website>
 Then use the returned content to answer the user's question."""
 
+AURA_PERSONA_CONVO = """You are Aura, a local AI assistant and personal companion. \
+You are sharp, warm, and direct — never robotic. \
+You have NO access to tools, the internet, or any external systems. \
+You cannot search the web, control the PC, access files, or run any commands. \
+You are purely a conversational partner. \
+Keep responses concise unless depth is asked for. \
+Always respond in English EVEN IF the user writes or speaks in another language.
 
-async def _build_system_prompt() -> str:
+Be warm, direct, and conversational. Short and natural.
+
+You may see relevant memories and context about the user below. \
+Use this information to make your responses personal and helpful — \
+but remember you cannot save new memories or run any tools."""
+
+
+async def _build_system_prompt(persona: str = AURA_PERSONA_TOOLS) -> str:
     context = await get_context_block()
     results = chroma_store.get_relevant(context)
     memories = [r["text"] for r in results]
 
-    parts = [AURA_PERSONA]
+    parts = [persona]
     if context:
         parts.append(f"\n## Live Context\n{context}")
     if memories:
@@ -168,21 +193,19 @@ async def _build_system_prompt() -> str:
     except Exception:
         pass
 
-    global _turns_since_memory
-    should_nudge = False
-    with _turns_lock:
-        if _turns_since_memory >= MEMORY_AUTOSAVE_INTERVAL:
-            should_nudge = True
-    if should_nudge:
-        parts.append(
-            "\n(Note: Consider using the `memory` tool if you've learned something new about the user.)"
-        )
+    # Only nudge about saving memories if the persona can actually use the memory tool
+    if "`memory` tool" in persona:
+        global _turns_since_memory
+        with _turns_lock:
+            if _turns_since_memory >= MEMORY_AUTOSAVE_INTERVAL:
+                parts.append(
+                    "\n(Note: Consider using the `memory` tool if you've learned something new about the user.)"
+                )
 
     return "\n".join(parts)
 
 
 async def _build_vault_context(message: str) -> str | None:
-    """If the user message seems to reference vault-worthy topics, inject relevant snippets."""
     vault_hints = {"note", "study", "lecture", "assignment", "project", "research",
                    "remember", "what is", "what was", "how do", "explain", "my notes"}
     if not any(h in message.lower() for h in vault_hints):
@@ -271,6 +294,11 @@ async def _run_tool(name: str, args: dict) -> str:
 
 
 # ── Agent Loop ────────────────────────────────────────────────────────────────
+# Flow:
+#   1. classify_intent(message) via Gemini 1.5 Flash → TRUE / FALSE
+#   2. FALSE → OpenRouter + AURA_PERSONA_CONVO (pure conversation, no tools)
+#   3. TRUE  → Groq + AURA_PERSONA_TOOLS (tool loop via <function=name>)
+#   4. After tool loop → Mistral (deep mode) or OpenRouter (auto mode)
 
 async def run(
     message: str,
@@ -280,25 +308,24 @@ async def run(
     global _turns_since_memory
     with _turns_lock:
         _turns_since_memory += 1
-    system_prompt = await _build_system_prompt()
+
+    # Step 1: Classify intent with Gemini 1.5 Flash
+    needs_tools = await classify_intent(message)
+    logger.info("Router: classify_intent=%s mode=%s", "TOOLS" if needs_tools else "CONVO", mode)
+
     vault_ctx = await _build_vault_context(message)
-    if vault_ctx:
-        system_prompt += "\n\n" + vault_ctx
-    messages = [
-        {"role": "system", "content": system_prompt},
-        *history,
-        {"role": "user", "content": message},
-    ]
 
-    _likely_needs_tools = needs_tools(message)
-    if _likely_needs_tools:
-        logger.info("Routing: tool path (Cerebras first)")
-    else:
-        logger.info("Routing: conversation path (Groq direct)")
-
-    # ── Pure conversation — skip tool loop entirely ───────────────────────────
-    if not _likely_needs_tools:
-        client, model = get_client_and_model(mode)
+    # ── CONVERSATION PATH (OpenRouter + AURA_PERSONA_CONVO) ──────────────────
+    if not needs_tools:
+        system_prompt = await _build_system_prompt(AURA_PERSONA_CONVO)
+        if vault_ctx:
+            system_prompt += "\n\n" + vault_ctx
+        messages = [
+            {"role": "system", "content": system_prompt},
+            *history,
+            {"role": "user", "content": message},
+        ]
+        client, model = get_client_and_model("convo")
         stream = await client.chat.completions.create(
             model=model,
             messages=messages,
@@ -316,14 +343,19 @@ async def run(
         chroma_store.save(f"Aura: {''.join(full_response)}")
         return
 
-    # ── Tool path ─────────────────────────────────────────────────────────────
-    tool_rounds = 0
+    # ── TOOL PATH (Groq + AURA_PERSONA_TOOLS) ────────────────────────────────
+    system_prompt = await _build_system_prompt(AURA_PERSONA_TOOLS)
+    if vault_ctx:
+        system_prompt += "\n\n" + vault_ctx
 
+    messages = [
+        {"role": "system", "content": system_prompt},
+        *history,
+        {"role": "user", "content": message},
+    ]
+
+    tool_rounds = 0
     while tool_rounds < MAX_TOOL_ROUNDS:
-        # Use Groq for tool calls, OpenRouter fallback on 429.
-        # NOTE: tools=TOOLS deliberately omitted — Llama 3.3 on Groq uses native
-        # <function=name> format in text; sending tools= causes tool_use_failed errors.
-        # Native function calls are parsed server-side by _parse_native_function().
         try:
             client, model = get_client_and_model("tools")
             response = await client.chat.completions.create(
@@ -335,9 +367,7 @@ async def run(
         except Exception as e:
             if "429" in str(e) or "too_many_requests" in str(e):
                 logger.warning("Groq rate limited, falling back to OpenRouter.")
-                from core.router import openrouter_client
-                from core.config import MODEL_FAST
-                client, model = openrouter_client, MODEL_FAST
+                client, model = get_client_and_model("convo")
                 response = await client.chat.completions.create(
                     model=model,
                     messages=messages,
@@ -349,9 +379,8 @@ async def run(
 
         msg = response.choices[0].message
 
-        # ── Process native <function=name> tags ────────────────────────────────
-        # Check for Llama-native <function=name> format first
         if msg.content:
+            # ── Parse native <function=name> tags ────────────────────────────
             native_calls = _parse_native_function(msg.content)
             if native_calls:
                 cleaned = msg.content
@@ -364,9 +393,7 @@ async def run(
                         "type": "function",
                         "function": {"name": nc["name"], "arguments": json.dumps(nc["arguments"])},
                     })
-                cleaned = cleaned.strip()
-                fake_msg = {"role": "assistant", "content": None, "tool_calls": tool_calls}
-                messages.append(fake_msg)
+                messages.append({"role": "assistant", "content": None, "tool_calls": tool_calls})
                 for tc in tool_calls:
                     name = tc["function"]["name"]
                     args = json.loads(tc["function"]["arguments"])
@@ -377,8 +404,29 @@ async def run(
                 tool_rounds += 1
                 continue
 
+            # ── Text response from Groq (no more function calls) ─────────────
             cleaned = _scrub(msg.content).strip()
             if cleaned:
+                if mode == "deep":
+                    # Route through Mistral for deep summarization
+                    client, model = get_client_and_model("deep")
+                    stream = await client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        stream=True,
+                        max_tokens=1024,
+                    )
+                    full_response = []
+                    async for chunk in stream:
+                        delta = chunk.choices[0].delta.content or ""
+                        if delta:
+                            delta = _scrub(delta)
+                            full_response.append(delta)
+                            yield delta
+                    chroma_store.save(f"User: {message}")
+                    chroma_store.save(f"Aura: {''.join(full_response)}")
+                    return
+
                 yield cleaned
                 chroma_store.save(f"User: {message}")
                 chroma_store.save(f"Aura: {msg.content}")
@@ -386,8 +434,12 @@ async def run(
 
         break
 
-    # ── Stream final response from Groq after tools ran ───────────────────────
-    client, model = get_client_and_model(mode)
+    # ── Post-tool-loop: deep summarization or casual response ─────────────────
+    if mode == "deep":
+        client, model = get_client_and_model("deep")
+    else:
+        client, model = get_client_and_model("convo")
+
     stream = await client.chat.completions.create(
         model=model,
         messages=messages,

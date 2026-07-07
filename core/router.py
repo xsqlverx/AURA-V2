@@ -1,10 +1,11 @@
-"""LLM routing — Mistral (deep) + OpenRouter (fast) + Groq (tools).
-All use OpenAI-compatible endpoints so agent.py needs zero changes.
-"""
+"""LLM routing — classifier (Gemini), convo (OpenRouter), tools (Groq), research (Mistral)."""
+
+import logging
 
 from openai import AsyncOpenAI
 
 from core.config import (
+    GEMINI_API_KEY,
     MISTRAL_API_KEY,
     OPENROUTER_API_KEY,
     GROQ_API_KEY,
@@ -13,73 +14,94 @@ from core.config import (
     MODEL_TOOLS,
 )
 
-# ── Clients ───────────────────────────────────────────────────────────────────
+logger = logging.getLogger(__name__)
 
-mistral_client = AsyncOpenAI(
-    api_key=MISTRAL_API_KEY,
-    base_url="https://api.mistral.ai/v1",
+# ── Clients ──────────────────────────────────────────────────────────────────
+
+gemini_client = AsyncOpenAI(
+    api_key=GEMINI_API_KEY,
+    base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
 )
 
-openrouter_client = AsyncOpenAI(
-    api_key=OPENROUTER_API_KEY,
-    base_url="https://openrouter.ai/api/v1",
+mistral_client = (
+    AsyncOpenAI(api_key=MISTRAL_API_KEY, base_url="https://api.mistral.ai/v1")
+    if MISTRAL_API_KEY else None
 )
 
-groq_client = AsyncOpenAI(
-    api_key=GROQ_API_KEY,
-    base_url="https://api.groq.com/openai/v1",
+openrouter_client = (
+    AsyncOpenAI(api_key=OPENROUTER_API_KEY, base_url="https://openrouter.ai/api/v1")
+    if OPENROUTER_API_KEY else None
 )
 
-# ── Tool keyword classifier ───────────────────────────────────────────────────
-_TOOL_KEYWORDS = {
-    "volume", "mute", "unmute", "louder", "quieter", "play", "pause",
-    "next track", "previous track", "skip", "music",
-    "open", "launch", "start", "close", "run", "app",
-    "make", "create", "generate", "build",
-    "shutdown", "restart", "reboot", "sleep", "lock", "hibernate",
-    "cancel shutdown",
-    "file", "folder", "directory", "create folder", "list files",
-    "search", "look up", "google", "find", "browse", "website", "url",
-    "cpu", "ram", "memory", "disk", "battery", "stats", "usage",
-    "clipboard", "copy", "paste", "type", "press", "hotkey",
-    "note", "notes", "write down", "remind",
-    "remember", "memory", "forget", "recall",
-    "whatsapp", "message", "send",
-    "screenshot", "screen",
-    # Vault / follow-up confirmations
-    "vault", "obsidian",
-    "yeah", "ya", "yes", "sure", "do it", "go ahead", "yep",
-    # Conversational queries — route to tool path so native func calls execute
-    "wrote about", "thing about", "my notes",
-    "what was", "what did i", "do i have",
-    "anything about", "tell me about",
-    "is there a", "find me",
-    # Study workflows
-    "quiz", "quizz", "test me", "practice",
-    "summarize", "summarise", "summary",
-    "draft", "assignment", "help me with",
-    "study", "revise", "review", "go over",
-}
+groq_client = (
+    AsyncOpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1")
+    if GROQ_API_KEY else None
+)
+
+# ── Intent Classifier (Gemini 1.5 Flash) ──────────────────────────────────────
+# Replaces the old brittle needs_tools() keyword-matcher with a lightweight LLM
+# call that asks Gemini 1.5 Flash for a strict TRUE / FALSE answer.
+
+CLASSIFIER_SYSTEM_PROMPT = """You are a strict router. Your job is to determine if the user's message requires:
+- Using tools (web search, browser control, system control, files, apps, memory, etc.)
+- Accessing real-time data, the internet, or external information
+
+Respond with exactly one word: TRUE or FALSE.
+
+TRUE means: the user is asking to do something that requires a tool or web access.
+FALSE means: the user is just chatting, asking for opinions, having a conversation, or asking questions that don't require external data or tool execution.
+
+Examples:
+User: "what's the weather in Tokyo?" → TRUE
+User: "open youtube" → TRUE
+User: "search for python tutorials" → TRUE
+User: "what do you think about AI?" → FALSE
+User: "hello how are you" → FALSE
+User: "tell me a joke" → FALSE
+User: "remember that I like coffee" → TRUE
+User: "shut down the pc" → TRUE
+User: "explain quantum computing" → FALSE
+User: "compare iPhone 15 and Pixel 8" → TRUE"""
+
+CLASSIFIER_MODEL = "gemini-1.5-flash"
 
 
-def needs_tools(message: str) -> bool:
-    lowered = message.lower()
-    return any(kw in lowered for kw in _TOOL_KEYWORDS)
+async def classify_intent(message: str) -> bool:
+    """Use Gemini 1.5 Flash to determine if the message requires tools/web access.
+    Returns True for tool-requiring messages, False for pure conversation."""
+    try:
+        response = await gemini_client.chat.completions.create(
+            model=CLASSIFIER_MODEL,
+            messages=[
+                {"role": "system", "content": CLASSIFIER_SYSTEM_PROMPT},
+                {"role": "user", "content": message},
+            ],
+            max_tokens=10,
+            temperature=0.0,
+        )
+        result = response.choices[0].message.content.strip().upper()
+        return result == "TRUE"
+    except Exception as e:
+        logger.error("Gemini classifier failed: %s. Defaulting to FALSE (conversation).", e)
+        return False
 
 
-def get_client_and_model(mode: str) -> tuple:
-    """
+# ── Client Selection ─────────────────────────────────────────────────────────
+
+def get_client_and_model(mode: str = "convo") -> tuple:
+    """Returns (client, model_name) for the requested mode.
+
     Modes:
-        "deep"  — Mistral Small (smart, research, conversation)
-        "fast"  — OpenRouter Llama 3.1 8B (casual, low latency)
-        "tools" — Groq Llama 3.3 70B (reliable function calling via native tags)
+        "convo" — OpenRouter Llama 3.1 8B (conversation, no tools)
+        "tools" — Groq Llama 3.3 70B (tool execution via <function=name>)
+        "deep"  — Mistral Small (deep research, summarization)
     """
     match mode:
-        case "deep":
-            return mistral_client, MODEL_DEEP
-        case "fast":
-            return openrouter_client, MODEL_FAST
+        case "convo":
+            return (openrouter_client, MODEL_FAST) if openrouter_client else (gemini_client, CLASSIFIER_MODEL)
         case "tools":
-            return groq_client, MODEL_TOOLS
+            return (groq_client, MODEL_TOOLS) if groq_client else (gemini_client, CLASSIFIER_MODEL)
+        case "deep":
+            return (mistral_client, MODEL_DEEP) if mistral_client else (gemini_client, CLASSIFIER_MODEL)
         case _:
-            return openrouter_client, MODEL_FAST
+            return (openrouter_client, MODEL_FAST) if openrouter_client else (gemini_client, CLASSIFIER_MODEL)
