@@ -430,13 +430,22 @@ async def _stream_to_tts_async(text: str, history: list, tts) -> str:
             continue
         buffer += chunk
 
-        # Feed TTS aggressively — every ~40+ chars split on last space
-        while len(buffer) > 40:
-            last_space = buffer.rfind(" ", 0, -1)
-            if last_space < 20:
-                break
-            phrase = buffer[:last_space]
-            buffer = buffer[last_space + 1:]
+        # Feed TTS — sentence-boundary splits at ~120+ chars for natural prosody
+        while len(buffer) > 120:
+            split_at = -1
+            for sep in (". ", "! ", "? "):
+                idx = buffer.rfind(sep, 0, -1)
+                if idx > 60:
+                    split_at = max(split_at, idx + 1)
+            if split_at > 60:
+                phrase = buffer[:split_at]
+                buffer = buffer[split_at + 1:]
+            else:
+                last_space = buffer.rfind(" ", 0, -1)
+                if last_space < 60:
+                    break
+                phrase = buffer[:last_space]
+                buffer = buffer[last_space + 1:]
             if phrase.strip():
                 send_state("speaking")
                 tts.speak(phrase.strip())

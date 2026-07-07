@@ -1,11 +1,10 @@
-"""LLM routing — classifier (Gemini), convo (OpenRouter), tools (Groq), research (Mistral)."""
+"""LLM routing — classifier (Mistral + keyword fallback), convo (OpenRouter), tools (Groq), research (Mistral)."""
 
 import logging
 
 from openai import AsyncOpenAI
 
 from core.config import (
-    GEMINI_API_KEY,
     MISTRAL_API_KEY,
     OPENROUTER_API_KEY,
     GROQ_API_KEY,
@@ -17,11 +16,6 @@ from core.config import (
 logger = logging.getLogger(__name__)
 
 # ── Clients ──────────────────────────────────────────────────────────────────
-
-gemini_client = AsyncOpenAI(
-    api_key=GEMINI_API_KEY,
-    base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-)
 
 mistral_client = (
     AsyncOpenAI(api_key=MISTRAL_API_KEY, base_url="https://api.mistral.ai/v1")
@@ -38,9 +32,9 @@ groq_client = (
     if GROQ_API_KEY else None
 )
 
-# ── Intent Classifier (Gemini 1.5 Flash) ──────────────────────────────────────
-# Replaces the old brittle needs_tools() keyword-matcher with a lightweight LLM
-# call that asks Gemini 1.5 Flash for a strict TRUE / FALSE answer.
+# ── Intent Classifier (Mistral + keyword fallback) ────────────────────────────
+# Uses Mistral Small for AI-powered classification. Falls back to keyword
+# matching if Mistral is rate-limited or unavailable — no single point of failure.
 
 CLASSIFIER_SYSTEM_PROMPT = """You are a strict router. Your job is to determine if the user's message requires:
 - Using tools (web search, browser control, system control, files, apps, memory, etc.)
@@ -63,15 +57,42 @@ User: "shut down the pc" → TRUE
 User: "explain quantum computing" → FALSE
 User: "compare iPhone 15 and Pixel 8" → TRUE"""
 
-CLASSIFIER_MODEL = "gemini-1.5-flash"
+_CLASSIFIER_MODEL = "mistral-small-latest"
+
+_TOOL_KEYWORDS = {
+    "search", "find", "open ", "weather", "youtube", "google",
+    "what is", "who is", "play", "volume", "mute", "shutdown",
+    "restart", "lock", "scrape", "browser", "click", "type",
+    "scroll", "remember", "save ", "memory", "vault", "note",
+    "study", "whatsapp", "send ", "compare", "price", "news",
+    "research", "go to", "launch", "stop", "pause", "next",
+    "previous", "create ", "clipboard", "copy", "paste", "press",
+    "stats", "kill", "list ", "make ", "build ", "generate",
+    "quiz", "summarize", "draft", "assign",
+    "shut", "date", "time", "define", "calculate", "translate",
+    "download", "screenshot", "record",
+}
+
+
+def _keyword_fallback(message: str) -> bool:
+    """Lightweight keyword classifier — no API calls, zero latency."""
+    msg = message.lower().strip()
+    return any(kw in msg for kw in _TOOL_KEYWORDS)
 
 
 async def classify_intent(message: str) -> bool:
-    """Use Gemini 1.5 Flash to determine if the message requires tools/web access.
-    Returns True for tool-requiring messages, False for pure conversation."""
+    """Classify whether the message needs tools or is pure conversation.
+
+    First tries Mistral Small (AI-powered, best accuracy).
+    Falls back to keyword matching if Mistral is unavailable or rate-limited.
+    """
+    if mistral_client is None:
+        logger.info("No Mistral client available, using keyword fallback")
+        return _keyword_fallback(message)
+
     try:
-        response = await gemini_client.chat.completions.create(
-            model=CLASSIFIER_MODEL,
+        response = await mistral_client.chat.completions.create(
+            model=_CLASSIFIER_MODEL,
             messages=[
                 {"role": "system", "content": CLASSIFIER_SYSTEM_PROMPT},
                 {"role": "user", "content": message},
@@ -82,8 +103,8 @@ async def classify_intent(message: str) -> bool:
         result = response.choices[0].message.content.strip().upper()
         return result == "TRUE"
     except Exception as e:
-        logger.error("Gemini classifier failed: %s. Defaulting to FALSE (conversation).", e)
-        return False
+        logger.warning("Mistral classifier failed (%s), using keyword fallback", e)
+        return _keyword_fallback(message)
 
 
 # ── Client Selection ─────────────────────────────────────────────────────────
@@ -98,10 +119,10 @@ def get_client_and_model(mode: str = "convo") -> tuple:
     """
     match mode:
         case "convo":
-            return (openrouter_client, MODEL_FAST) if openrouter_client else (gemini_client, CLASSIFIER_MODEL)
+            return (openrouter_client, MODEL_FAST) if openrouter_client else (mistral_client, MODEL_DEEP)
         case "tools":
-            return (groq_client, MODEL_TOOLS) if groq_client else (gemini_client, CLASSIFIER_MODEL)
+            return (groq_client, MODEL_TOOLS) if groq_client else (openrouter_client, MODEL_FAST)
         case "deep":
-            return (mistral_client, MODEL_DEEP) if mistral_client else (gemini_client, CLASSIFIER_MODEL)
+            return (mistral_client, MODEL_DEEP) if mistral_client else (openrouter_client, MODEL_FAST)
         case _:
-            return (openrouter_client, MODEL_FAST) if openrouter_client else (gemini_client, CLASSIFIER_MODEL)
+            return (openrouter_client, MODEL_FAST) if openrouter_client else (mistral_client, MODEL_DEEP)

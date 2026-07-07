@@ -29,11 +29,19 @@ class BaseTTSEngine:
         self._paused = threading.Event()
         self.is_speaking = threading.Event()
 
+        self._audio_buffer = np.array([], dtype=np.float32)
+        self._buffer_lock = threading.Lock()
+
         self._gen_thread = threading.Thread(target=self._generator, daemon=True)
         self._gen_thread.start()
 
-        self._player_thread = threading.Thread(target=self._player, daemon=True)
-        self._player_thread.start()
+        self._stream = sd.OutputStream(
+            samplerate=self._sample_rate,
+            channels=1,
+            callback=self._audio_callback,
+            blocksize=1024,
+        )
+        self._stream.start()
 
     def _synthesize_now(self, text: str):
         raise NotImplementedError
@@ -60,33 +68,39 @@ class BaseTTSEngine:
             finally:
                 self._text_queue.task_done()
 
-    def _player(self):
-        while not self._stop.is_set():
-            try:
-                audio = self._audio_queue.get(timeout=0.5)
-            except queue.Empty:
-                continue
-            if self._paused.is_set():
-                self._audio_queue.task_done()
-                continue
+    def _audio_callback(self, outdata, frames, time_info, status):
+        wrote_audio = False
+        with self._buffer_lock:
+            while self._audio_buffer.size < frames:
+                try:
+                    chunk = self._audio_queue.get_nowait()
+                    self._audio_buffer = np.concatenate([self._audio_buffer, chunk.ravel()])
+                    self._audio_queue.task_done()
+                except queue.Empty:
+                    break
+
+            n = min(self._audio_buffer.size, frames)
+            if n > 0:
+                outdata[:n, 0] = self._audio_buffer[:n]
+                outdata[n:, 0] = 0.0
+                self._audio_buffer = self._audio_buffer[n:]
+                wrote_audio = True
+            else:
+                outdata[:, 0] = 0.0
+
+        if wrote_audio:
             self.is_speaking.set()
-            try:
-                sd.play(audio, self._sample_rate)
-                sd.wait()
-            except Exception as e:
-                logger.error("TTS playback error: %s", e)
-            finally:
-                self._audio_queue.task_done()
-                if self._audio_queue.empty():
-                    self.is_speaking.clear()
-                time.sleep(0.05)
+        elif self._audio_queue.empty():
+            self.is_speaking.clear()
 
     def speak(self, text: str):
         if text and text.strip():
             self._text_queue.put(text)
 
     def stop_playback(self):
-        sd.stop()
+        self._stream.abort()
+        with self._buffer_lock:
+            self._audio_buffer = np.array([], dtype=np.float32)
         while not self._text_queue.empty():
             try:
                 self._text_queue.get_nowait()
@@ -100,17 +114,24 @@ class BaseTTSEngine:
             except queue.Empty:
                 break
         self.is_speaking.clear()
+        self._stream.start()
 
     def pause(self):
         self._paused.set()
-        sd.stop()
+        self._stream.abort()
 
     def resume(self):
         self._paused.clear()
+        self._stream.start()
 
     def wait_until_done(self):
         self._text_queue.join()
         self._audio_queue.join()
+        while True:
+            with self._buffer_lock:
+                if self._audio_buffer.size == 0:
+                    break
+            time.sleep(0.05)
 
     def stop(self):
         self._stop.set()
