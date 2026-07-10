@@ -31,6 +31,7 @@ _KNOWN_PLAYERS = {
     "firefox.exe": "Firefox",
     "brave.exe": "Brave",
     "opera.exe": "Opera",
+    "comet.exe": "Comet",
     "youtube music.exe": "YouTube Music",
 }
 
