@@ -71,6 +71,8 @@ _TOOL_KEYWORDS = {
     "quiz", "summarize", "draft", "assign",
     "shut", "date", "time", "define", "calculate", "translate",
     "download", "screenshot", "record",
+    "remind", "reminder", "task", "schedule", "calendar",
+    "delete", "remove ",
 }
 
 

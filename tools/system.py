@@ -1,5 +1,6 @@
 """System tools — volume, media, apps, files, system control, clipboard, notes, input."""
 
+import json
 import os
 import subprocess
 import threading
@@ -334,5 +335,73 @@ def execute_hotkey(*keys) -> dict:
         import pyautogui
         pyautogui.hotkey(*keys)
         return {"success": True}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ── Tasks / Reminders ─────────────────────────────────────────────────────────
+
+_TASKS_FILE = Path(__file__).resolve().parent.parent / "data" / "tasks.json"
+
+def _load_tasks() -> list[dict]:
+    if not _TASKS_FILE.exists():
+        return []
+    try:
+        return json.loads(_TASKS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+def _save_tasks(tasks: list[dict]):
+    _TASKS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _TASKS_FILE.write_text(json.dumps(tasks, indent=2), encoding="utf-8")
+
+def _next_id(tasks: list[dict]) -> str:
+    mx = 0
+    for t in tasks:
+        try:
+            mx = max(mx, int(t.get("id", 0)))
+        except (ValueError, TypeError):
+            pass
+    return str(mx + 1)
+
+def create_task(name: str, date: str, time: str = "", category: str = "General") -> dict:
+    try:
+        if not name or not date:
+            return {"error": "name and date are required"}
+        tasks = _load_tasks()
+        task = {
+            "id": _next_id(tasks),
+            "name": name,
+            "category": category,
+            "color": {"Work": "#00A0FF", "Health": "#00FF80", "Personal": "#FF5050", "Study": "#BF5AF2", "General": "#888888"}.get(category, "#888888"),
+            "time": time,
+            "date": date,
+        }
+        tasks.append(task)
+        _save_tasks(tasks)
+        return {"success": True, "task": task}
+    except Exception as e:
+        return {"error": str(e)}
+
+def list_tasks(date: str = "") -> dict:
+    try:
+        tasks = _load_tasks()
+        if date:
+            tasks = [t for t in tasks if t.get("date", "") == date]
+        return {"success": True, "tasks": tasks}
+    except Exception as e:
+        return {"error": str(e)}
+
+def delete_task(task_id: str) -> dict:
+    try:
+        if not task_id:
+            return {"error": "task_id is required"}
+        tasks = _load_tasks()
+        before = len(tasks)
+        tasks = [t for t in tasks if t.get("id") != task_id]
+        if len(tasks) < before:
+            _save_tasks(tasks)
+            return {"success": True, "deleted": True}
+        return {"success": True, "deleted": False, "message": "Task not found"}
     except Exception as e:
         return {"error": str(e)}

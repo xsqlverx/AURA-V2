@@ -284,6 +284,17 @@ async def _run_tool(name: str, args: dict) -> str:
                     topic=args.get("topic", ""),
                     action=args.get("action", "quiz"),
                 )
+            case "create_task":
+                result = system.create_task(
+                    name=args.get("name", ""),
+                    date=args.get("date", ""),
+                    time=args.get("time", ""),
+                    category=args.get("category", "General"),
+                )
+            case "list_tasks":
+                result = system.list_tasks(date=args.get("date", ""))
+            case "delete_task":
+                result = system.delete_task(task_id=args.get("task_id", ""))
             case _:
                 result = {"error": f"Unhandled tool: {name}"}
 
