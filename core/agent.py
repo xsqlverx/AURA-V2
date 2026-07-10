@@ -97,6 +97,21 @@ Always output function calls as native tags.
 Do not describe what you're about to do.
 Example: <function=open_website {"url":"https://youtube.com"}<function=open_website>
 
+## Calendar / Reminders
+You have `create_task`, `list_tasks`, and `delete_task` tools for managing the \
+user's calendar. When the user says "remind me", "set a reminder", "add a task", \
+"schedule", or anything about putting an event on the calendar — use \
+`create_task`. YOU figure out the date from natural language using today's date \
+as reference. Date is required, time is optional.
+Examples:
+- "remind me Wednesday" → create_task name="Reminder" date="2026-07-15"
+- "set a reminder for brunch on the 13th" → create_task name="Brunch" date="2026-07-13"
+- "remind me to pay fees on July 13th 2026" → create_task name="Pay fees" date="2026-07-13"
+Use `list_tasks` when the user asks "what's on my calendar" or "show my reminders".
+Use `delete_task` when they ask to remove one.
+DO NOT use the `memory` tool for reminders or calendar events — `memory` is for \
+long-term facts about the user, not for scheduling.
+
 ## Obsidian Vault
 You have a `vault` tool for the user's Obsidian vault.
 Use EXACT native format:
