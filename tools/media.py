@@ -45,7 +45,19 @@ _APP_EXCLUDES = {
     ],
     "wmplayer.exe": ["windows media player"],
     "vlc.exe": ["vlc media player"],
+    # Chromium-based browsers — idle / new tab / chat windows
+    # Browser names are handled by the exact-match check below;
+    # only add extra patterns here (e.g. "new tab").
+    "chrome": ["new tab"],
+    "msedge": ["new tab"],
+    "brave": ["new tab"],
+    "opera": ["new tab"],
+    "comet": ["new tab"],
+    "firefox": ["new tab"],
 }
+
+# Any title containing these substrings is considered "not playing"
+_CONTAINS_EXCLUDES = {"messages"}
 
 try:
     import ctypes
@@ -64,7 +76,12 @@ def _is_playing_content(title: str, proc_name: str) -> bool:
     lookup_name = proc_name.replace(".exe", "").strip().lower()
     excludes = _APP_EXCLUDES.get(proc_name, _APP_EXCLUDES.get(lookup_name, []))
     for pattern in excludes:
-        if lowered == pattern.strip().lower() or lowered.startswith(pattern.strip().lower()):
+        pat = pattern.strip().lower()
+        if lowered == pat or lowered.startswith(pat):
+            return False
+    # Global contains-blocklist (catches "messages" in browser chats, etc.)
+    for pat in _CONTAINS_EXCLUDES:
+        if pat in lowered:
             return False
     # A single word that matches the app name = idle
     if lowered == proc_name.replace(".exe", "").strip().lower():
@@ -128,7 +145,16 @@ def get_now_playing() -> dict:
                 return cached
         return {"error": "No active media player window detected"}
 
+    # Prefer windows with media site markers (YouTube, Spotify, etc.)
+    # over generic browser windows (docs, social media, etc.)
+    _MEDIA_MARKERS = ["youtube", "youtube music", "spotify", "soundcloud",
+                       "deezer", "tidal", "apple music", "pandora", "bandcamp"]
     best = candidates[0]
+    for c in candidates:
+        cl = c["window_text"].lower()
+        if any(m in cl for m in _MEDIA_MARKERS):
+            best = c
+            break
 
     title = best["window_text"]
     artist = ""
