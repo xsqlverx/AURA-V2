@@ -2,16 +2,20 @@
 
 import json
 import os
+import re
 import subprocess
 import threading
 import time
 import webbrowser
 import logging
+from collections import deque
 from pathlib import Path
 from datetime import datetime
+from urllib.parse import quote_plus
 
 import psutil
 import pyperclip
+import requests
 
 from tools.audio_manager import get_volume as _get_volume, set_volume as _set_volume, mute as _mute
 
@@ -85,7 +89,11 @@ APP_MAP = {
     "discord":       "discord.exe",
     "vlc":           "vlc.exe",
     "obs":           "obs64.exe",
+    "obsidian":      "obsidian.exe",
     "steam":         "steam.exe",
+    "logseq":        "logseq.exe",
+    "notion":        "notion.exe",
+    "slack":         "slack.exe",
 }
 
 def launch_app(app_name: str) -> dict:
@@ -134,6 +142,27 @@ def list_running_processes(filter_pattern: str = None, exclude_system: bool = Tr
                 pass
         procs.sort(key=lambda x: x["name"].lower())
         return {"processes": procs, "count": len(procs)}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def get_top_processes(n: int = 15) -> dict:
+    try:
+        procs = []
+        for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_percent"]):
+            try:
+                cpu = p.info["cpu_percent"] or 0
+                mem = p.info["memory_percent"] or 0
+                procs.append({
+                    "pid": p.info["pid"],
+                    "name": p.info["name"],
+                    "cpu_percent": round(cpu, 1),
+                    "memory_percent": round(mem, 1),
+                })
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+        procs.sort(key=lambda x: x["cpu_percent"], reverse=True)
+        return {"processes": procs[:n], "count": len(procs[:n])}
     except Exception as e:
         return {"error": str(e)}
 
@@ -219,6 +248,78 @@ def open_website(url: str) -> dict:
         return {"error": str(e)}
 
 
+def play_youtube(query: str) -> dict:
+    """Play a YouTube video for the given song/artist/topic.
+
+    Priority 1 for 'play/watch/listen' intent. Searches YouTube via the
+    public frontend HTML, extracts the first non-Shorts video ID via regex,
+    and opens the watch URL directly in the browser so the video actually
+    plays. Falls back to opening the filtered search results page.
+    """
+    query = (query or "").strip()
+    if not query:
+        return {"error": "No query provided for play_youtube"}
+
+    encoded = quote_plus(query)
+    # Video filter (sp=EgIQAQ%3D%3D) narrows results to Videos only
+    search_url = (
+        f"https://www.youtube.com/results"
+        f"?search_query={encoded}&sp=EgIQAQ%3D%3D"
+    )
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+
+    try:
+        r = requests.get(search_url, headers=headers, timeout=10)
+        html = r.text
+
+        # Extract all video IDs — YouTube embeds them as JSON in the HTML
+        video_ids = re.findall(r'"videoId":"([A-Za-z0-9_-]{11})"', html)
+
+        seen = set()
+        for vid in video_ids:
+            if vid in seen:
+                continue
+            seen.add(vid)
+            # Skip YouTube Shorts
+            if f'/shorts/{vid}' in html:
+                continue
+            watch_url = f"https://www.youtube.com/watch?v={vid}"
+            webbrowser.open(watch_url)
+            logger.info("play_youtube: opening %s for query=%s", watch_url, query)
+            return {
+                "success": True,
+                "action": "playing_youtube",
+                "query": query,
+                "url": watch_url,
+            }
+
+        # No valid video found — open search page
+        webbrowser.open(search_url)
+        return {
+            "success": True,
+            "action": "opened_youtube_search",
+            "query": query,
+            "url": search_url,
+            "warning": "Could not find a valid video, opened search results",
+        }
+
+    except Exception as e:
+        logger.warning("play_youtube scrape failed (%s), falling back to search page", e)
+        try:
+            webbrowser.open(search_url)
+            return {"success": True, "action": "opened_youtube_search_fallback", "query": query, "url": search_url}
+        except Exception as e2:
+            return {"error": str(e2)}
+
+
 # ── System Control ────────────────────────────────────────────────────────────
 
 def shutdown(delay_seconds: int = 20) -> dict:
@@ -256,7 +357,54 @@ def cancel_shutdown() -> dict:
     except Exception as e:
         return {"error": str(e)}
 
+# ── Network throughput sampler (continuous background thread) ────────────────
+_net_lock = threading.Lock()
+_net_samples = deque(maxlen=6)  # last 6 samples (~12s window)
+_net_smoothed = {"sent_mbps": 0.0, "recv_mbps": 0.0}
+_net_thread_started = False
+
+def _net_sampler_loop():
+    """Sample network counters every 2 seconds, keep a rolling average."""
+    global _net_smoothed, _net_samples, _net_thread_started
+    try:
+        prev = psutil.net_io_counters()
+        prev_time = time.time()
+        while True:
+            time.sleep(2)
+            try:
+                cur = psutil.net_io_counters()
+                cur_time = time.time()
+                elapsed = cur_time - prev_time
+                if elapsed > 0:
+                    sent_mbps = (cur.bytes_sent - prev.bytes_sent) / elapsed / 1_000_000
+                    recv_mbps = (cur.bytes_recv - prev.bytes_recv) / elapsed / 1_000_000
+                    with _net_lock:
+                        _net_samples.append((sent_mbps, recv_mbps))
+                        if _net_samples:
+                            avg_sent = sum(s for s, _ in _net_samples) / len(_net_samples)
+                            avg_recv = sum(r for _, r in _net_samples) / len(_net_samples)
+                            _net_smoothed = {
+                                "sent_mbps": round(avg_sent, 2),
+                                "recv_mbps": round(avg_recv, 2),
+                            }
+                prev, prev_time = cur, cur_time
+            except Exception:
+                pass
+    except Exception:
+        pass
+    finally:
+        _net_thread_started = False
+
+def _ensure_net_sampler():
+    global _net_thread_started
+    if not _net_thread_started:
+        _net_thread_started = True
+        t = threading.Thread(target=_net_sampler_loop, daemon=True)
+        t.start()
+
+
 def get_system_stats() -> dict:
+    _ensure_net_sampler()
     try:
         ram = psutil.virtual_memory()
         disk = psutil.disk_usage("/")
@@ -278,7 +426,8 @@ def get_system_stats() -> dict:
 
         # Uptime
         boot = psutil.boot_time()
-        uptime_seconds = int(datetime.now().timestamp() - boot)
+        now_ts = datetime.now().timestamp()
+        uptime_seconds = int(now_ts - boot)
         days, remainder = divmod(uptime_seconds, 86400)
         hours, remainder = divmod(remainder, 3600)
         minutes, _ = divmod(remainder, 60)
@@ -290,6 +439,11 @@ def get_system_stats() -> dict:
         parts.append(f"{minutes}m")
         result["uptime"] = " ".join(parts)
         result["uptime_seconds"] = uptime_seconds
+
+        # Network throughput (smoothed from background sampler)
+        with _net_lock:
+            result["network_sent_mbps"] = _net_smoothed["sent_mbps"]
+            result["network_recv_mbps"] = _net_smoothed["recv_mbps"]
 
         return result
     except Exception as e:

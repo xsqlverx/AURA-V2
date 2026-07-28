@@ -13,7 +13,7 @@ import threading
 import numpy as np
 import sounddevice as sd
 
-from core.config import UI_SOCKET_PORT
+from core.config import SERVER_URL, UI_SOCKET_PORT
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,26 @@ _VOICE_INTENT_KEYWORDS = {
 }
 
 ptt_active = threading.Event()
+flow_mode  = threading.Event()
 _stop      = threading.Event()
+
+
+def toggle_flow_mode(tts=None) -> bool:
+    """Toggle flow mode on/off. Returns the new state."""
+    if flow_mode.is_set():
+        flow_mode.clear()
+        logger.info("Flow mode deactivated.")
+        send_state("idle")
+        if tts:
+            tts.speak("Flow mode deactivated.")
+        return False
+    else:
+        flow_mode.set()
+        logger.info("Flow mode activated.")
+        send_state("flow_mode")
+        if tts:
+            tts.speak("Flow mode active. I'm listening.")
+        return True
 
 
 # ── Socket helpers ────────────────────────────────────────────────────────────
@@ -139,12 +158,20 @@ def record_speech(ptt_mode: bool = False) -> str | None:
         samplerate=SAMPLE_RATE, channels=1, dtype="int16", blocksize=CHUNK_SIZE
     ) as stream:
         for _ in range(drain_chunks):
-            stream.read(CHUNK_SIZE)
+            try:
+                stream.read(CHUNK_SIZE)
+            except sd.PortAudioError:
+                logger.warning("Audio device error during drain")
+                return None
 
         while True:
             if _stop.is_set():
                 break
-            chunk, _ = stream.read(CHUNK_SIZE)
+            try:
+                chunk, _ = stream.read(CHUNK_SIZE)
+            except sd.PortAudioError:
+                logger.warning("Audio device error during recording")
+                return None
             amplitude = np.abs(chunk).max()
             frames.append(chunk.copy())
 
@@ -430,19 +457,19 @@ async def _stream_to_tts_async(text: str, history: list, tts) -> str:
             continue
         buffer += chunk
 
-        # Feed TTS — sentence-boundary splits at ~120+ chars for natural prosody
-        while len(buffer) > 120:
+        # Feed TTS — sentence-boundary splits at ~60+ chars for fast first audio
+        while len(buffer) > 60:
             split_at = -1
             for sep in (". ", "! ", "? "):
                 idx = buffer.rfind(sep, 0, -1)
-                if idx > 60:
+                if idx > 30:
                     split_at = max(split_at, idx + 1)
-            if split_at > 60:
+            if split_at > 30:
                 phrase = buffer[:split_at]
                 buffer = buffer[split_at + 1:]
             else:
                 last_space = buffer.rfind(" ", 0, -1)
-                if last_space < 60:
+                if last_space < 30:
                     break
                 phrase = buffer[:last_space]
                 buffer = buffer[last_space + 1:]
@@ -478,17 +505,10 @@ def stream_to_tts(text: str, history: list, tts) -> str:
         return ""
 
 
-# ── Session ───────────────────────────────────────────────────────────────────
+# ── Utterance processing ──────────────────────────────────────────────────────
 
-def run_session(tts, whisper, history: list, ptt_mode: bool = False):
-    tts.wait_until_done()
-
-    wav_path = record_speech(ptt_mode=ptt_mode)
-    if not wav_path:
-        logger.info("Nothing recorded.")
-        send_state("idle")
-        return
-
+def _process_utterance(tts, whisper, history, wav_path) -> bool:
+    """Transcribe a wav and handle the result. Returns True if something was processed."""
     send_state("thinking")
 
     try:
@@ -502,8 +522,7 @@ def run_session(tts, whisper, history: list, ptt_mode: bool = False):
     if not user_text:
         tts.speak("Didn't catch that.")
         tts.wait_until_done()
-        send_state("idle")
-        return
+        return False
 
     logger.info("You said: %s", user_text)
     display_user(user_text)
@@ -511,49 +530,143 @@ def run_session(tts, whisper, history: list, ptt_mode: bool = False):
     from comms import state as comms_state
     session = comms_state.get_session()
 
-    # ── End session ───────────────────────────────────────────────────────────
     if session and _matches(user_text, _END_KEYWORDS):
         _handle_end_session(tts)
         tts.wait_until_done()
-        send_state("idle")
-        return
+        return True
 
-    # ── Switch to auto-convo mode ─────────────────────────────────────────────
     if session and _matches(user_text, _AUTOCONVO_KEYWORDS):
         from comms.discord_bot import set_mode
         set_mode("auto")
         tts.wait_until_done()
-        send_state("idle")
-        return
+        return True
 
-    # ── Single intercept ──────────────────────────────────────────────────────
     if session and _matches(user_text, _INTERCEPT_KEYWORDS):
         _handle_single_intercept(session, history, tts)
         tts.wait_until_done()
-        send_state("idle")
-        return
+        return True
 
-    # ── Briefing ──────────────────────────────────────────────────────────────
     if _matches(user_text, _BRIEFING_KEYWORDS):
         _handle_briefing(tts)
         tts.wait_until_done()
-        send_state("idle")
-        return
+        return True
 
-    # ── Voice switch (keyword + Groq LLM double-check) ────────────────────────
     if _matches(user_text, _VOICE_INTENT_KEYWORDS):
         _handle_voice_switch(tts, user_text)
         tts.wait_until_done()
-        send_state("idle")
-        return
+        return True
 
-    # ── Normal conversation ───────────────────────────────────────────────────
     reply = stream_to_tts(user_text, history, tts)
     if reply:
         display_aura(reply)
-
     tts.wait_until_done()
-    send_state("idle")
+    return True
+
+
+# ── Session ───────────────────────────────────────────────────────────────────
+
+def run_session(tts, whisper, history: list, ptt_mode: bool = False):
+    tts.wait_until_done()
+
+    wav_path = record_speech(ptt_mode=ptt_mode)
+    if not wav_path:
+        logger.info("Nothing recorded.")
+        if not flow_mode.is_set():
+            send_state("idle")
+        return
+
+    _process_utterance(tts, whisper, history, wav_path)
+
+    if not flow_mode.is_set():
+        send_state("idle")
+
+
+# ── Flow mode continuous listen ──────────────────────────────────────────────
+# Adopts the Mark-L pattern: keep the InputStream alive, use VAD to segment
+# utterances, check flow_mode between every chunk for instant deactivation.
+
+def _flow_listen_loop(tts, whisper, history):
+    """Continuous-stream listen loop for flow mode. Never opens/closes the mic."""
+    required_silent = int(SILENCE_SECS * SAMPLE_RATE / CHUNK_SIZE)
+    drain_chunks = int(0.4 * SAMPLE_RATE / CHUNK_SIZE)
+    # Rolling buffer ~0.3s to capture speech onset
+    pre_buf = []
+    pre_max = int(0.3 * SAMPLE_RATE / CHUNK_SIZE)
+
+    send_state("listening")
+
+    with sd.InputStream(
+        samplerate=SAMPLE_RATE, channels=1, dtype="int16", blocksize=CHUNK_SIZE
+    ) as stream:
+        for _ in range(drain_chunks):
+            if not flow_mode.is_set() or _stop.is_set():
+                return
+            try:
+                stream.read(CHUNK_SIZE)
+            except sd.PortAudioError:
+                return
+
+        while flow_mode.is_set() and not _stop.is_set():
+            frames = []
+            silent_chunks = 0
+            speech_started = False
+
+            # Wait for speech onset (check flow_mode between chunks)
+            while flow_mode.is_set() and not _stop.is_set():
+                try:
+                    chunk, _ = stream.read(CHUNK_SIZE)
+                except sd.PortAudioError:
+                    return
+                amplitude = np.abs(chunk).max()
+                pre_buf.append(chunk.copy())
+                if len(pre_buf) > pre_max:
+                    pre_buf.pop(0)
+
+                if amplitude > SPEECH_THRESH:
+                    frames = list(pre_buf) + [chunk.copy()]
+                    speech_started = True
+                    pre_buf.clear()
+                    break
+
+            if not speech_started or not flow_mode.is_set():
+                continue
+
+            # Record until silence (check flow_mode between chunks)
+            while flow_mode.is_set() and not _stop.is_set():
+                try:
+                    chunk, _ = stream.read(CHUNK_SIZE)
+                except sd.PortAudioError:
+                    break
+                amplitude = np.abs(chunk).max()
+                frames.append(chunk.copy())
+
+                if amplitude > SPEECH_THRESH:
+                    silent_chunks = 0
+                else:
+                    silent_chunks += 1
+
+                if silent_chunks >= required_silent:
+                    break
+
+            if not flow_mode.is_set() or _stop.is_set() or len(frames) < 5:
+                continue
+
+            send_state("thinking")
+
+            tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+            audio = np.concatenate(frames, axis=0)
+            with wave.open(tmp.name, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(SAMPLE_RATE)
+                wf.writeframes(audio.tobytes())
+            tmp.close()
+
+            _process_utterance(tts, whisper, history, tmp.name)
+
+            tts.wait_until_done()
+            if flow_mode.is_set() and not _stop.is_set():
+                send_state("listening")
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
@@ -576,6 +689,11 @@ def run(tts, whisper_size: str = "tiny"):
     logger.info("Voice pipeline running. Hold Right Shift to talk.")
 
     while not _stop.is_set():
+        # Flow mode — continuous-stream listen loop (Mark-L style)
+        if flow_mode.is_set():
+            _flow_listen_loop(tts, whisper, history)
+            continue
+
         # Open the input stream only for wakeword/ptt detection, but
         # defer any call to `run_session()` until after the stream is
         # closed to avoid nested InputStream instances (PortAudio crashes).
@@ -584,11 +702,19 @@ def run(tts, whisper_size: str = "tiny"):
             samplerate=SAMPLE_RATE, channels=1, dtype="int16", blocksize=CHUNK_SIZE
         ) as stream:
             while not _stop.is_set():
+                if flow_mode.is_set():
+                    break
+
                 if ptt_active.is_set():
                     do_session = (True)
                     break
 
-                chunk, _ = stream.read(CHUNK_SIZE)
+                try:
+                    chunk, _ = stream.read(CHUNK_SIZE)
+                except sd.PortAudioError:
+                    logger.warning("Audio device error, reopening stream...")
+                    break
+
                 score = oww.predict(
                     chunk.flatten().astype(np.int16)
                 ).get(WAKE_MODEL, 0)

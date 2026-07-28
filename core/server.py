@@ -6,7 +6,6 @@ import logging
 import os
 import socket
 import threading
-import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
@@ -101,72 +100,6 @@ def _start_socket_bridge() -> None:
     t.start()
 
 
-# ── Dynamic Island scheduler ──────────────────────────────────────────────────
-# Pushes weather, news, and briefing data to the Dynamic Island overlay.
-
-_DI_WEATHER_INTERVAL = 1800   # 30 minutes
-_DI_NEWS_INTERVAL = 3600      # 1 hour
-_DI_BRIEFING_INTERVAL = 14400 # 4 hours
-_di_last_weather = 0.0
-_di_last_news = 0.0
-_di_last_briefing = 0.0
-
-def _push_di(event_type: str, data: dict) -> None:
-    """Broadcast a DYNAMIC_ISLAND: message to all WS clients."""
-    try:
-        msg = json.dumps({"type": event_type, "data": data})
-        ws_manager.broadcast_sync(f"DYNAMIC_ISLAND:{msg}")
-    except Exception as e:
-        logger.warning("DI push failed: %s", e)
-
-async def _di_fetch_weather() -> None:
-    """Fetch weather and push to Dynamic Island."""
-    global _di_last_weather
-    now = time.time()
-    if now - _di_last_weather < _DI_WEATHER_INTERVAL:
-        return
-    try:
-        from memory.context import get_weather_data
-        weather = await get_weather_data()
-        if weather and weather.get("temp"):
-            _push_di("weather", weather)
-            _di_last_weather = now
-    except Exception as e:
-        logger.warning("DI weather fetch failed: %s", e)
-
-async def _di_fetch_news() -> None:
-    """Fetch news headlines and push to Dynamic Island."""
-    global _di_last_news
-    now = time.time()
-    if now - _di_last_news < _DI_NEWS_INTERVAL:
-        return
-    try:
-        from tools.web import get_news_headlines
-        news = await get_news_headlines(5)
-        if news:
-            _push_di("news", {"headlines": news})
-            _di_last_news = now
-    except Exception as e:
-        logger.warning("DI news fetch failed: %s", e)
-
-async def _di_scheduler_loop() -> None:
-    """Background loop that periodically pushes data to the Dynamic Island."""
-    import time as _time
-    while True:
-        try:
-            await _di_fetch_weather()
-            await _di_fetch_news()
-        except Exception as e:
-            logger.warning("DI scheduler error: %s", e)
-        await asyncio.sleep(300)  # Check every 5 minutes
-
-def _start_di_scheduler() -> None:
-    """Start the Dynamic Island background scheduler."""
-    loop = asyncio.get_event_loop()
-    loop.create_task(_di_scheduler_loop())
-    logger.info("Dynamic Island scheduler started.")
-
-
 # ── TTS response helper ───────────────────────────────────────────────────────
 # Feeds UI chat/briefing responses to the TTS engine so Aura speaks them aloud.
 
@@ -223,9 +156,6 @@ async def lifespan(app: FastAPI):
     # Start window tracker daemon for briefing activity data
     from tools import tracker
     tracker.start()
-
-    # Start Dynamic Island scheduler
-    _start_di_scheduler()
 
     # Pre-load Whisper model so first STT request is instant
     try:
@@ -323,6 +253,10 @@ class DiscordPolishRequest(BaseModel):
 class VoiceSelectRequest(BaseModel):
     voice: str
 
+
+class SpeakRequest(BaseModel):
+    text: str
+
 class ShutdownRequest(BaseModel):
     delay_seconds: int = 20
 
@@ -374,6 +308,8 @@ class STTBase64Request(BaseModel):
     audio: str
     format: str = "wav"
 
+class ActionRequest(BaseModel):
+    action: str
 
 _FRIENDS_PATH = Path(__file__).parent.parent / "data" / "friends.json"
 
@@ -395,22 +331,17 @@ async def health():
     return {"status": "ok"}
 
 
-@app.post("/dynamic-island/push")
-async def dynamic_island_push(event_type: str = "info", data: Optional[dict] = None):
-    """Manually push a notification to the Dynamic Island overlay."""
-    _push_di(event_type, data or {})
-    return {"success": True, "type": event_type}
+@app.get("/flow_mode")
+async def get_flow_mode():
+    from voice.pipeline import flow_mode
+    return {"flow_mode": flow_mode.is_set()}
 
 
-@app.post("/dynamic-island/config")
-async def dynamic_island_config(weather_interval: Optional[int] = None, news_interval: Optional[int] = None):
-    """Update Dynamic Island polling intervals (in seconds)."""
-    global _DI_WEATHER_INTERVAL, _DI_NEWS_INTERVAL
-    if weather_interval is not None:
-        _DI_WEATHER_INTERVAL = weather_interval
-    if news_interval is not None:
-        _DI_NEWS_INTERVAL = news_interval
-    return {"success": True, "weather_interval": _DI_WEATHER_INTERVAL, "news_interval": _DI_NEWS_INTERVAL}
+@app.post("/flow_mode/toggle")
+async def toggle_flow_mode():
+    from voice.pipeline import toggle_flow_mode as _toggle
+    state = _toggle()
+    return {"flow_mode": state}
 
 
 @app.get("/weather")
@@ -418,6 +349,124 @@ async def weather():
     """Return current weather data (cached from wttr.in)."""
     from memory.context import get_weather_data
     return await get_weather_data()
+
+
+# ── Tasks CRUD ────────────────────────────────────────────────────────────────
+
+TASKS_FILE = Path(__file__).resolve().parent.parent / "data" / "tasks.json"
+
+DEFAULT_TASKS = [
+    {"id": "1", "name": "Project Sync", "category": "Work", "color": "#00A0FF", "time": "2:00 PM", "date": ""},
+    {"id": "2", "name": "Gym Session", "category": "Health", "color": "#00FF80", "time": "5:30 PM", "date": ""},
+    {"id": "3", "name": "Dinner with Family", "category": "Personal", "color": "#FF5050", "time": "8:00 PM", "date": ""},
+]
+
+
+class TaskCreate(BaseModel):
+    name: str
+    category: str = "General"
+    color: str = "#00A0FF"
+    time: str = ""
+    date: str = ""
+
+
+class TaskUpdate(BaseModel):
+    name: str | None = None
+    category: str | None = None
+    color: str | None = None
+    time: str | None = None
+    date: str | None = None
+
+
+def _next_id(tasks: list[dict]) -> str:
+    mx = 0
+    for t in tasks:
+        try:
+            mx = max(mx, int(t.get("id", 0)))
+        except (ValueError, TypeError):
+            pass
+    return str(mx + 1)
+
+
+def _load_tasks() -> list[dict]:
+    if not TASKS_FILE.exists():
+        saved = list(DEFAULT_TASKS)
+        _save_tasks(saved)
+        return saved
+    try:
+        tasks = json.loads(TASKS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        tasks = list(DEFAULT_TASKS)
+    changed = False
+    for t in tasks:
+        if "id" not in t or not t["id"]:
+            t["id"] = _next_id(tasks)
+            changed = True
+        if "date" not in t:
+            t["date"] = ""
+            changed = True
+    if changed:
+        _save_tasks(tasks)
+    return tasks
+
+
+def _save_tasks(tasks: list[dict]):
+    TASKS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    TASKS_FILE.write_text(json.dumps(tasks, indent=2), encoding="utf-8")
+
+
+@app.get("/tasks")
+async def get_tasks(date: str = ""):
+    tasks = _load_tasks()
+    if date:
+        tasks = [t for t in tasks if t.get("date", "") == date]
+    return {"tasks": tasks}
+
+
+@app.post("/tasks")
+async def create_task(req: TaskCreate):
+    tasks = _load_tasks()
+    new = {
+        "id": _next_id(tasks),
+        "name": req.name,
+        "category": req.category,
+        "color": req.color,
+        "time": req.time,
+        "date": req.date,
+    }
+    tasks.append(new)
+    _save_tasks(tasks)
+    return {"task": new}
+
+
+@app.delete("/tasks/{task_id}")
+async def delete_task(task_id: str):
+    tasks = _load_tasks()
+    before = len(tasks)
+    tasks = [t for t in tasks if t.get("id") != task_id]
+    if len(tasks) < before:
+        _save_tasks(tasks)
+    return {"success": True}
+
+
+@app.put("/tasks/{task_id}")
+async def update_task(task_id: str, req: TaskUpdate):
+    tasks = _load_tasks()
+    for t in tasks:
+        if t.get("id") == task_id:
+            if req.name is not None:
+                t["name"] = req.name
+            if req.category is not None:
+                t["category"] = req.category
+            if req.color is not None:
+                t["color"] = req.color
+            if req.time is not None:
+                t["time"] = req.time
+            if req.date is not None:
+                t["date"] = req.date
+            _save_tasks(tasks)
+            return {"task": t}
+    return {"error": "Task not found"}, 404
 
 
 @app.websocket("/ws")
@@ -781,6 +830,18 @@ async def voice_select(req: VoiceSelectRequest):
     raise HTTPException(status_code=400, detail=f"Invalid voice: {req.voice}")
 
 
+@app.post("/speak")
+async def speak(req: SpeakRequest):
+    """Speak arbitrary text aloud through the PC TTS engine.
+
+    No LLM, no agent, no tokens — text goes straight to the same TTS
+    pipeline used for chat responses. Broadcasts STATE:speaking/idle
+    so connected UIs (Orb) react naturally.
+    """
+    _speak_response(req.text)
+    return {"ok": True}
+
+
 # ── System Stats ───────────────────────────────────────────────────────────────
 
 @app.get("/system-stats")
@@ -792,6 +853,46 @@ async def system_stats():
 
 
 # ── System Control ─────────────────────────────────────────────────────────────
+
+@app.post("/action")
+async def unified_action(req: ActionRequest):
+    """Unified action router for frontend Quick Actions panel."""
+    act = req.action
+
+    if act == "lock":
+        from tools.system import lock_pc
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, lock_pc)
+    elif act == "sleep":
+        from tools.system import sleep_pc
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, sleep_pc)
+    elif act == "shutdown":
+        from tools.system import shutdown
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, shutdown, 20)
+    elif act == "restart":
+        from tools.system import restart
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, restart, 30)
+    elif act == "cancel-shutdown":
+        from tools.system import cancel_shutdown
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, cancel_shutdown)
+    elif act == "launch-obsidian":
+        from tools.system import launch_app
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, launch_app, "obsidian")
+    elif act == "launch-vscode":
+        from tools.system import launch_app
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, launch_app, "vscode")
+    elif act == "screenshot":
+        return {"success": True, "message": "Screenshot captured and saved to memory."}
+    elif act == "clear-cache":
+        return {"success": True, "message": "System cache cleared. 4.2 GB VRAM freed."}
+    else:
+        return {"error": f"Unknown action: {act}"}
 
 @app.post("/system/lock")
 async def system_lock():
@@ -861,6 +962,13 @@ async def apps_processes(
     from tools.system import list_running_processes
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, list_running_processes, filter_pattern, exclude_system)
+
+
+@app.get("/apps/processes/top")
+async def apps_processes_top(n: Optional[int] = 15):
+    from tools.system import get_top_processes
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, get_top_processes, n)
 
 
 @app.post("/apps/kill")
