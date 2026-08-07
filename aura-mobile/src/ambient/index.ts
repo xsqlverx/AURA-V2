@@ -1,0 +1,12 @@
+export { AmbientProvider, useAmbient } from './AmbientProvider';
+export type { AmbientEvent, AmbientEventType, AmbientPriority, AmbientSurface, AmbientOrbReaction } from './types';
+export { getEventMeta, registerEventType, getAllEventTypes, AMBIENT_EVENT_TYPES } from './AmbientRegistry';
+export type { AmbientEventMeta } from './types';
+export { AmbientContext } from './AmbientContext';
+export type { ConversationPhase, AmbientContextState } from './AmbientContext';
+export { AmbientHistory } from './AmbientHistory';
+export { AmbientQueue } from './AmbientQueue';
+export { AmbientOrbReactor } from './AmbientOrbReactor';
+export { AmbientSurfaceRenderer } from './AmbientPresenter';
+export { AmbientContextUpdater } from './AmbientContextUpdater';
+export { useAmbientEvents, AmbientEventWiring } from './AmbientEvents';

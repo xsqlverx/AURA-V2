@@ -4,6 +4,8 @@ import {
   SafeAreaView, RefreshControl, Alert, Modal, Platform,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
+import { useNavigation } from '@react-navigation/native';
+import type { DrawerNavigationProp } from '@react-navigation/drawer';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { getMemory, createMemory, updateMemory, deleteMemory } from '../../src/api/aura';
@@ -15,6 +17,7 @@ import GlassInput from '../../src/components/GlassInput';
 type MemoryEntry = { id: string; text: string; metadata?: any };
 
 export default function MemoryScreen() {
+  const navigation = useNavigation<DrawerNavigationProp<{}>>();
   const [entries, setEntries] = useState<MemoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -98,7 +101,10 @@ export default function MemoryScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <View>
+        <Pressable onPress={() => navigation.openDrawer()} style={styles.menuBtn}>
+          <MaterialIcons name="menu" size={20} color={colors.onSurface} />
+        </Pressable>
+        <View style={styles.headerText}>
           <Text style={styles.headerTitle}>Memory</Text>
           <Text style={styles.headerSub}>{entries.length} entries</Text>
         </View>
@@ -192,10 +198,16 @@ export default function MemoryScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgDeep },
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingVertical: 14,
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 12, paddingTop: 28,
     borderBottomWidth: 1, borderBottomColor: colors.glassBorder,
   },
+  menuBtn: {
+    width: 40, height: 40, borderRadius: radius.input,
+    backgroundColor: colors.glassBg, borderWidth: 1, borderColor: colors.glassBorder,
+    alignItems: 'center', justifyContent: 'center', marginRight: 12,
+  },
+  headerText: { flex: 1 },
   headerTitle: { ...typography.headlineMd, color: colors.onSurface, fontSize: 18, letterSpacing: 1 },
   headerSub: { color: colors.onSurface, fontSize: 11, fontWeight: '500', marginTop: 2 },
   addBtn: {

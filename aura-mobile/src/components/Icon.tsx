@@ -1,5 +1,6 @@
 import * as Lucide from 'lucide-react-native';
-import { View } from 'react-native';
+import { text } from '../tokens/colors';
+import { iconSize } from '../tokens/spacing';
 
 const MAP: Record<string, keyof typeof Lucide> = {
   home: 'Home',
@@ -57,6 +58,121 @@ const MAP: Record<string, keyof typeof Lucide> = {
   dns: 'Globe',
   key: 'KeyRound',
   menu: 'Menu',
+  fingerprint: 'Fingerprint',
+  language: 'Globe',
+  chat: 'MessageSquare',
+  'grid-view': 'Grid2x2',
+  'volume-off': 'VolumeX',
+  monitor: 'Monitor',
+  favorite: 'Heart',
+  globe: 'Globe',
+  pin: 'Pin',
+  refresh: 'RefreshCw',
+  trash: 'Trash2',
+  network: 'Network',
+  'activity': 'Activity',
+  'cpu': 'Cpu',
+  'thermometer': 'Thermometer',
+  'clock': 'Clock',
+  'calendar': 'Calendar',
+  'user': 'User',
+  'shield': 'Shield',
+  'alert': 'AlertTriangle',
+  'bell': 'Bell',
+  'bookmark': 'Bookmark',
+  'briefcase': 'Briefcase',
+  'camera': 'Camera',
+  'cloud': 'Cloud',
+  'compass': 'Compass',
+  'database': 'Database',
+  'download': 'Download',
+  'external-link': 'ExternalLink',
+  'eye': 'Eye',
+  'file': 'File',
+  'filter': 'Filter',
+  'flag': 'Flag',
+  'flash': 'Zap',
+  'gift': 'Gift',
+  'hash': 'Hash',
+  'headphones': 'Headphones',
+  'heart': 'Heart',
+  'image': 'Image',
+  'inbox': 'Inbox',
+  'info': 'Info',
+  'layers': 'Layers',
+  'link': 'Link',
+  'list': 'List',
+  'loader': 'Loader',
+  'location': 'MapPin',
+  'log-in': 'LogIn',
+  'log-out': 'LogOut',
+  'mail': 'Mail',
+  'map': 'Map',
+  'maximize': 'Maximize2',
+  'minimize': 'Minimize2',
+  'minus': 'Minus',
+  'more-horizontal': 'MoreHorizontal',
+  'more-vertical': 'MoreVertical',
+  'move': 'Move',
+  'package': 'Package',
+  'paperclip': 'Paperclip',
+  'phone': 'Phone',
+  'pie-chart': 'PieChart',
+  'play': 'Play',
+  'plus': 'Plus',
+  'printer': 'Printer',
+  'radio': 'Radio',
+  'rotate': 'RotateCw',
+  'rss': 'Rss',
+  'scissors': 'Scissors',
+  'send': 'Send',
+  'server': 'Server',
+  'share': 'Share2',
+  'shopping-cart': 'ShoppingCart',
+  'sliders': 'Sliders',
+  'smartphone': 'Smartphone',
+  'speaker': 'Speaker',
+  'star': 'Star',
+  'sun': 'Sun',
+  'tablet': 'Tablet',
+  'tag': 'Tag',
+  'target': 'Target',
+  'thumbs-down': 'ThumbsDown',
+  'thumbs-up': 'ThumbsUp',
+  'toggle': 'ToggleLeft',
+  'tool': 'Wrench',
+  'trending-down': 'TrendingDown',
+  'trending-up': 'TrendingUp',
+  'truck': 'Truck',
+  'tv': 'Tv',
+  'umbrella': 'Umbrella',
+  'unlock': 'Unlock',
+  'upload': 'Upload',
+  'video': 'Video',
+  'voicemail': 'Voicemail',
+  'watch': 'Watch',
+  'wifi': 'Wifi',
+  'wind': 'Wind',
+  'zap': 'Zap',
+  'zoom-in': 'ZoomIn',
+  'zoom-out': 'ZoomOut',
+  'expand-less': 'ChevronUp',
+  'expand-more': 'ChevronDown',
+  'picture-as-pdf': 'FileText',
+  'folder-zip': 'Archive',
+  'video-file': 'Video',
+  'presentation': 'Monitor',
+  'application': 'Monitor',
+  'more-vert': 'MoreVertical',
+  'swap-horiz': 'ArrowLeftRight',
+  'screenshot': 'Monitor',
+  'focus-mode': 'Eye',
+  'clipboard-history': 'ClipboardList',
+  'system-update': 'RefreshCw',
+  'volume-down': 'Volume1',
+  'repeat': 'Repeat',
+  'shuffle': 'Shuffle',
+  'queue-music': 'ListMusic',
 };
 
 type Props = {
@@ -65,16 +181,16 @@ type Props = {
   color?: string;
 };
 
-export default function Icon({ name, size = 20, color = '#fff' }: Props) {
-  const lucideName = MAP[name];
-  if (!lucideName) {
-    const FallbackIcon = Lucide['Circle'] as any;
-    return <FallbackIcon size={size} color={color} />;
+export default function Icon({ name, size = iconSize.list, color = text.primary }: Props) {
+  const iconName = MAP[name];
+  if (!iconName) {
+    const Fallback = Lucide.Circle;
+    return <Fallback size={size} color={color} />;
   }
-  const LucideIcon = Lucide[lucideName] as any;
+  const LucideIcon = Lucide[iconName] as any;
   if (!LucideIcon) {
-    const FallbackIcon = Lucide['Circle'] as any;
-    return <FallbackIcon size={size} color={color} />;
+    const Fallback = Lucide.Circle;
+    return <Fallback size={size} color={color} />;
   }
   return <LucideIcon size={size} color={color} />;
 }

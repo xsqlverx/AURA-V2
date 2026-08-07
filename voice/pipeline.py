@@ -9,6 +9,7 @@ import socket
 import logging
 import tempfile
 import threading
+import time
 
 import numpy as np
 import sounddevice as sd
@@ -84,6 +85,18 @@ _VOICE_INTENT_KEYWORDS = {
 ptt_active = threading.Event()
 flow_mode  = threading.Event()
 _stop      = threading.Event()
+
+# When True, the voice session releases the mic so dictation (/dictation) can record.
+_dictation_active = False
+
+
+def set_dictation_active(active: bool) -> None:
+    global _dictation_active
+    _dictation_active = bool(active)
+
+
+def is_dictation_active() -> bool:
+    return _dictation_active
 
 
 def toggle_flow_mode(tts=None) -> bool:
@@ -186,6 +199,8 @@ def record_speech(ptt_mode: bool = False) -> str | None:
                     break
             else:
                 if speech_started and silent_chunks >= required_silent:
+                    break
+                if not speech_started and len(frames) >= int(3.0 * chunks_per_sec):
                     break
 
             if len(frames) >= max_chunks:
@@ -606,13 +621,13 @@ def _flow_listen_loop(tts, whisper, history):
             except sd.PortAudioError:
                 return
 
-        while flow_mode.is_set() and not _stop.is_set():
+        while flow_mode.is_set() and not _stop.is_set() and not _dictation_active:
             frames = []
             silent_chunks = 0
             speech_started = False
 
             # Wait for speech onset (check flow_mode between chunks)
-            while flow_mode.is_set() and not _stop.is_set():
+            while flow_mode.is_set() and not _stop.is_set() and not _dictation_active:
                 try:
                     chunk, _ = stream.read(CHUNK_SIZE)
                 except sd.PortAudioError:
@@ -632,7 +647,7 @@ def _flow_listen_loop(tts, whisper, history):
                 continue
 
             # Record until silence (check flow_mode between chunks)
-            while flow_mode.is_set() and not _stop.is_set():
+            while flow_mode.is_set() and not _stop.is_set() and not _dictation_active:
                 try:
                     chunk, _ = stream.read(CHUNK_SIZE)
                 except sd.PortAudioError:
@@ -689,6 +704,10 @@ def run(tts, whisper_size: str = "tiny"):
     logger.info("Voice pipeline running. Hold Right Shift to talk.")
 
     while not _stop.is_set():
+        if _dictation_active:
+            time.sleep(0.2)
+            continue
+
         # Flow mode — continuous-stream listen loop (Mark-L style)
         if flow_mode.is_set():
             _flow_listen_loop(tts, whisper, history)
@@ -702,7 +721,7 @@ def run(tts, whisper_size: str = "tiny"):
             samplerate=SAMPLE_RATE, channels=1, dtype="int16", blocksize=CHUNK_SIZE
         ) as stream:
             while not _stop.is_set():
-                if flow_mode.is_set():
+                if flow_mode.is_set() or _dictation_active:
                     break
 
                 if ptt_active.is_set():

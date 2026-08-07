@@ -1,153 +1,185 @@
-# AGENTS.md — AURA V2
+# AGENTS.md — Working with AURA V2
 
-## Quick Start
+## What This Project Is
 
-```bash
-# Activate venv first
+AURA V2 is a Windows-only, locally-hosted AI companion daemon. Three threads run in parallel: a FastAPI backend (port 8000), a voice pipeline (wake word + PTT + STT + TTS), and a Discord bot. A separate UI repo (`C:\AURA_V2_UI`) provides a Next.js HUD wrapped in Tauri v2 and a PySide6 Dynamic Island overlay.
+
+## Running the Project
+
+```powershell
 .\venv\Scripts\Activate.ps1
-
-# Run AURA (starts FastAPI on port 8000 + voice pipeline + Discord bot)
-python main.py
-
-# Run tests (requires server running on localhost:8000)
-python Test.py
+python main.py          # Starts all 3 threads + waits for health check
 ```
 
-Server must be UP before running tests. `Test.py` hits `http://localhost:8000/chat`.
+Tests require the server to be running first:
+```powershell
+python Test.py          # Integration tests hitting localhost:8000/chat
+```
 
-## Architecture
+Unit tests (if any exist in `tests/`):
+```powershell
+python -m pytest tests/
+```
 
-AURA is a **multi-threaded daemon** — not a simple script. Three threads run in parallel:
+## Project Layout
 
-| Thread | File | Purpose |
-|--------|------|---------|
-| FastAPI backend | `core/server.py` | REST API + WebSocket on port 8000 |
-| Voice pipeline | `voice/pipeline.py` | Wake word + PTT + STT + TTS loop |
-| Discord bot | `comms/discord_bot.py` | DM handler, importance classifier |
+```
+C:\AURA_V2\
+  main.py              # Entry point — launches 3 daemon threads
+  Test.py              # Integration tests (requires running server)
+  requirements.txt     # Python deps (24 packages — some imports are missing from this file)
+  .env.local           # API keys (NEVER commit)
+  .env.example         # Template for env vars
 
-Socket bridge: TCP port 9001 connects voice pipeline and Discord bot to the HUD UI (`C:\AURA_V2_UI\`). Two compiled Tauri v2 desktop apps live alongside the Next.js source:
+  core/                # Backend brain
+    config.py          # All env vars, model names, thresholds
+    server.py          # FastAPI app (~998 lines), 20+ endpoints, WebSocket, socket bridge
+    agent.py           # Agent loop (~473 lines), system prompt (AURA_PERSONA), tool dispatch
+    router.py          # LLM routing (Mistral classifier + keyword fallback, 3 models)
 
-| App | Path | Purpose |
-|-----|------|---------|
-| Desktop EXE | `C:\AURA_V2_UI\aura-desktop\` | Wraps Next.js static export — 1280×800 resizable window, frontend-only |
-| Dynamic Island | `C:\AURA_V2_UI\dynamic-island\` | Frameless transparent always-on-top pill overlay — 3 states (collapsed/expanded/full), WebSocket → AURA backend |
+  tools/               # 36 LLM-callable tools
+    registry.py        # Tool schemas (OpenAI function-calling format)
+    system.py          # Volume, apps, files, clipboard, notes, input, power
+    web.py             # Tavily + DuckDuckGo search, RSS news, YouTube
+    media.py           # Now-playing detection via Win32 window titles
+    browser_agent.py   # Playwright singleton — z_agent_submit, scrape_website, browser_control
+    whatsapp_web.py    # WhatsApp Web messaging via Playwright
+    study.py           # Quiz, summarize, draft from Obsidian vault notes
+    hotkeys.py         # Global hotkeys (Alt+M stops TTS)
+    tracker.py         # Foreground window tracker (polls every 30s)
+    audio_manager.py   # COM-threaded audio manager via pycaw
+
+  voice/               # Voice pipeline
+    pipeline.py        # Main loop (~504 lines): wake word, PTT, STT, TTS, intent intercepts
+    tts.py             # 3 TTS engines: Supertonic, Edge (default), Kokoro
+    stt.py             # Speech recording + faster-whisper transcription
+    emotion.py         # Emotion tag parser for TTS
+    wake.py            # openwakeword "hey_jarvis" detection
+    audio_utils.py     # Audio utility functions
+
+  memory/              # Memory system
+    chroma_store.py    # ChromaDB vector store (~290 lines), cosine similarity, dedup
+    store.py           # Curated file memory (USER.md, MEMORY.md), drift detection
+    context.py         # Live context injection (weather + time)
+    memory_tool.py     # LLM-callable memory handler (add/replace/remove/search/list)
+    vault.py           # Obsidian vault integration (search/read/create/append/delete/list/reindex)
+
+  comms/               # Communications
+    discord_bot.py     # Discord DM bot, single + auto mode, importance classifier
+    state.py           # Shared state between comms modules
+
+  data/                # Runtime data (gitignored except structure)
+    chroma/            # ChromaDB persistent storage
+    memories/          # USER.md, MEMORY.md
+    tasks.json         # Calendar/task entries
+    notes.json         # Notes backend
+    friends.json       # Discord friend ID mapping
+    .vault_index.json  # Obsidian vault note index
+```
 
 ## LLM Routing
 
-Three providers, three modes (`core/router.py`):
+Three providers, routed by task (`core/router.py`):
 
-| Mode | Provider | Model | Use |
-|------|----------|-------|-----|
-| `deep` | Mistral | `mistral-small-latest` | Smart conversation, research |
-| `fast` | OpenRouter | `meta-llama/llama-3.1-8b-instruct` | Casual, low-latency |
-| `tools` | Groq | `llama-3.3-70b-versatile` | Function calling |
+| Role | Provider | Model | Notes |
+|------|----------|-------|-------|
+| Classifier | Mistral | `mistral-small-latest` | Determines if tools are needed. Has keyword fallback (~50 patterns) if Mistral is unreachable. |
+| Conversation | OpenRouter | `meta-llama/llama-3.1-8b-instruct` | Casual chat, no tools. |
+| Tools | Groq | `llama-3.3-70b-versatile` | Native `<function=name>` text format. NOT OpenAI `tools=` parameter. |
+| Deep/Summary | Mistral | `mistral-small-latest` | Post-tool-loop summarization, research. |
 
-`needs_tools()` in `core/router.py:51` does keyword-based classification (99 patterns) to route between conversation and tool paths.
+The classifier in `router.py` uses a structured TRUE/FALSE prompt. Keyword fallback in `_TOOL_KEYWORDS` catches common patterns if the API is down.
 
 ## Tool System
 
-**31+ tools** defined in `tools/registry.py`, dispatched in `core/agent.py:_run_tool()`.
+36 tools defined in `tools/registry.py`. Dispatched in `core/agent.py:_run_tool()`.
 
 ### Native Function Format
 
-Groq Llama 3.3 uses native `<function=name>` text format (NOT OpenAI `tools=` parameter — that causes errors). Parser: `core/agent.py:_parse_native_function()`.
+Groq uses text-based `<function=name>` calls, NOT JSON `tools=`. Parser: `core/agent.py:_parse_native_function()`.
 
 ```
-<function=open_website {"url":"https://youtube.com"}<function=open_website>
-<function=get_system_stats<function=get_system_stats>   (no-args tools)
+<function=open_website {"url":"https://example.com"}<function=open_website>
+<function=get_system_stats<function=get_system_stats>
 ```
 
 Regex: `<function=(\w+)[=>\s]*(\{.*?\})?\s*(?:</function>|<function=\1>)`
 
 ### Tool Loop
 
-- `MAX_TOOL_ROUNDS = 3` — agent can call up to 3 tools per user message
-- After tools execute, a final streaming LLM call (Mistral) generates the summary response
-- `_scrub()` strips leaked `<function>` tags from streaming output
+- `MAX_TOOL_ROUNDS = 3` per user message
+- After tools execute, Mistral generates the final summary response
+- `_scrub()` strips leaked `<function>` tags from streaming output but preserves voice tags like `<laugh>`
 
-### One-Shot Guard
+### Important: Undispatched Tools
 
-`open_z_agent` has a 10-second cooldown (`tools/system.py:_last_z_agent_call`) to prevent the LLM from re-calling it in a loop.
+`browser_control` is registered in `tools/registry.py` but has NO `case` branch in `_run_tool()`. If the LLM calls it, it returns `{"error": "Unhandled tool: browser_control"}`. Do NOT add more tools to the registry without adding a corresponding dispatch case.
 
-## Browser Automation
+## How to Make Changes
 
-New in v2: AURA now uses **Playwright** (`tools/browser_agent.py`) instead of brittle PyAutoGUI screen coordinates for browser interactions. A singleton Playwright browser is reused across calls.
+### Adding a new tool
+1. Add schema to `tools/registry.py` (OpenAI function-calling format)
+2. Add `case "tool_name":` branch in `core/agent.py:_run_tool()`
+3. Implement the function in the appropriate `tools/*.py` file
+4. If the tool needs new keywords for classifier routing, add them to `_TOOL_KEYWORDS` in `core/router.py`
 
-| Function | Purpose |
-|----------|---------|
-| `z_agent_submit(prompt)` | Opens `chat.z.ai` in a headed browser, toggles Agent mode via DOM selectors (falls back to coords), types prompt, submits |
-| `scrape_website(url)` | Opens URL in headless browser, waits for JS render, returns visible body text |
+### Adding a new API endpoint
+1. Add route in `core/server.py`
+2. If the UI needs it, add the fetch call in `C:\AURA_V2_UI\src\lib\api.ts`
 
-## Key Files
+### Adding a new widget (UI)
+1. Create component in `C:\AURA_V2_UI\src\components\widgets/`
+2. Register in `WidgetManager.tsx` and the Zustand store (`aura-store.ts`)
+3. Add toggle in `TopBar.tsx`
 
-| File | Lines | What it does |
-|------|-------|--------------|
-| `core/agent.py` | 363 | Agent loop, system prompt (`AURA_PERSONA`), tool dispatch, native function parser |
-| `core/router.py` | 72 | LLM client selection, keyword classifier |
-| `core/server.py` | 851 | FastAPI app, 20+ endpoints, WebSocket, socket bridge, briefing pipeline |
-| `core/config.py` | 59 | All env vars, model names, memory thresholds |
-| `tools/registry.py` | 50 | Tool schemas (OpenAI function-calling format) |
-| `tools/system.py` | 297 | System tools (volume, apps, files, clipboard, notes, input, web) |
-| `tools/browser_agent.py` | 146 | Playwright singleton — `z_agent_submit`, `scrape_website` |
-| `tools/web.py` | 109 | Tavily + DuckDuckGo search, RSS news |
-| `tools/media.py` | 187 | Now-playing detection via Win32 window titles |
-| `voice/pipeline.py` | 598 | Main voice loop: wake word, PTT, STT, TTS, intent intercepts |
-| `voice/tts.py` | 307 | 3 TTS engines: Supertonic, Edge, Kokoro |
-| `memory/chroma_store.py` | 246 | ChromaDB vector store (cosine similarity, dedup, CRUD) |
-| `memory/store.py` | 234 | Curated file memory (USER.md, MEMORY.md, drift detection) |
-| `memory/memory_tool.py` | 128 | Memory agent tool — add, replace, remove, search, list |
+### Modifying the system prompt
+The system prompt is assembled in `core/agent.py:_build_system_prompt()`. The persona template is the `AURA_PERSONA` constant. Memory, contacts, live context, and vault snippets are injected dynamically.
 
-## Platform Constraints
+### Modifying tool routing
+Keywords live in `core/router.py:_TOOL_KEYWORDS`. The classifier prompt is in `router.py` as `_CLASSIFIER_SYSTEM`. If tools aren't being triggered, check both the keywords and the classifier prompt.
 
-**Windows-only.** Uses:
-- Win32 APIs (`EnumWindows`, `GetWindowTextW`, `GetForegroundWindow`)
-- COM threading (`pycaw`, `comtypes`) for audio control
-- `pyautogui` for keyboard/mouse automation (non-browser tools)
-- `playwright` for browser automation (z.ai + web scraping)
-- `pynput` for global hotkeys and PTT
+## Conventions
 
-## Configuration
+- **Python 3.14**, Windows-only
+- **No comments** in code unless explicitly asked
+- **No unit test framework** assumed — `Test.py` is integration-only (hits running server). `tests/` has isolated unit tests using pytest.
+- **Thread safety**: `_turns_since_memory` is a module global — NOT thread-safe. Don't add more globals.
+- **Env vars**: Read from `.env.local` via `python-dotenv`. See `.env.example` for the template.
+- **TTS default is `edge`** in config.py, but `.env.local` overrides to `supertonic`. Check `.env.local` for actual provider.
+- **Playwright** is used for browser automation (z_agent_submit, scrape_website, browser_control, whatsapp_web)
+- **PyAutoGUI** is used for keyboard/mouse automation outside the browser
+- **pynput** is used for global hotkeys and PTT detection
+- **COM threading** (`pycaw`, `comtypes`) for Windows audio control
+- **ChromaDB** uses `all-MiniLM-L6-v2` embeddings (384-dim), cosine similarity
+- **Curated memory** files (USER.md, MEMORY.md) have char limits and drift detection via SHA-256
 
-`.env.local` required (see `.env.example`):
+## Known Issues
 
-```
-MISTRAL_API_KEY=     # Required — Mistral AI
-OPENROUTER_API_KEY=  # Required — OpenRouter
-GROQ_API_KEY=        # Required — Groq
-DISCORD_BOT_TOKEN=   # Optional — Discord bot
-TAVILY_API_KEY=      # Optional — Web search (falls back to DuckDuckGo)
-TTS_PROVIDER=        # supertonic | edge | kokoro (default: supertonic)
-TTS_VOICE=           # Engine-specific voice name
-```
+1. **`browser_control` tool is registered but not dispatched** — no `case` in `_run_tool()`. Will error if called.
+2. **`requirements.txt` is incomplete** — `playwright`, `pynput`, `pyautogui`, `pyperclip`, `openai`, `tavily`, `requests`, `discord.py` are imported but not listed. They're installed manually or via other means.
+3. **`memory/memory_tool.py` has a dead `forget` action stub** — returns "not yet implemented", not in schema enum, LLM never calls it.
+4. **`voice/wake.py` imports non-existent `WhisperSTT`** from `voice.stt` — dead code, not imported anywhere.
+5. **`tools/tracker.py` exists but is not imported in `_run_tool()` or the registry.**
+6. **Classifier model comments in `agent.py` docstring say "Gemini 1.5 Flash"** — actual code uses Mistral Small. Docstring is stale.
+7. **No CI/CD** — manual testing only.
+8. **`_turns_since_memory` global is not thread-safe** for concurrent requests.
 
-Python 3.14.3. All deps in `requirements.txt` (21 packages).
+## Verification
 
-## Memory System
+After making changes:
+1. Start the server: `python main.py`
+2. Wait for health check to pass
+3. Run `python Test.py` for integration coverage
+4. Check `python -m pytest tests/` for unit tests
+5. Manually test affected endpoints via curl or the UI
 
-Three layers:
+## UI Repo
 
-| Layer | File | Purpose |
-|-------|------|---------|
-| ChromaDB vectors | `memory/chroma_store.py` | Semantic search, dedup (cosine > 0.95) |
-| Curated files | `memory/store.py` | USER.md (1375 chars), MEMORY.md (2200 chars) |
-| Live context | `memory/context.py` | Weather + time injection |
-
-Memory tool: `memory/memory_tool.py` — actions: add, replace, remove, search, list.
-
-## Testing
-
-`Test.py` — 15 integration tests across 14 categories:
-- Audio, Media, Apps, Files, Web, System, Clipboard, Notes, Input, Memory, Z.ai Agent, Briefing, Conversation, Edge Cases
-- Tests hit the `/chat` API endpoint with `stream=True`
-- `SKIP_SHUTDOWN=True` by default (skips dangerous system tests)
-
-## Gotchas
-
-- **`.env.local` contains live API keys** — never commit, check git history
-- **`_scrub()` strips XML tags** from LLM output — including leaked `<function>` tags
-- **Native function format is text-based** — parser uses regex, not JSON
-- **`needs_tools()` is keyword-based** — can false-positive on casual conversation
-- **Voice pipeline is blocking** — `page.wait_for_timeout()` in `z_agent_submit` blocks the event loop
-- **No unit tests** — only integration tests via `Test.py`
-- **No CI/CD** — manual testing only
-- **`_turns_since_memory` is a global** — not thread-safe for concurrent requests
+The UI lives at `C:\AURA_V2_UI` (separate git repo). Key facts:
+- **Next.js 16** + **Tauri v2** desktop wrapper + **PySide6** Dynamic Island overlay
+- **75 total components** (18 custom + 9 widgets + 48 shadcn/ui primitives)
+- **Zustand** for state, **React Query** for server state, **Framer Motion** for animations
+- All API calls go to `http://localhost:8000` (the FastAPI backend)
+- WebSocket at `ws://localhost:8000/ws` for real-time state push
+- Widgets are draggable + resizable, animate in/out with Genie effect
+- Island polls tasks every 5s, shows clock + weather + calendar + perf + media

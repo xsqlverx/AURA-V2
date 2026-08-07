@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -96,6 +97,33 @@ APP_MAP = {
     "slack":         "slack.exe",
 }
 
+_SEARCH_DIRS = [
+    "%LOCALAPPDATA%\\Programs",
+    "%LOCALAPPDATA%",
+    "%APPDATA%\\..\\Local\\Programs",
+    "%PROGRAMFILES%",
+    "%PROGRAMFILES(X86)%",
+    "%PROGRAMFILES%\\WindowsApps",
+    "%WINDIR%\\System32",
+]
+
+def _resolve_exe(name: str) -> str | None:
+    found = shutil.which(name)
+    if found:
+        return found
+    target = name if name.lower().endswith(".exe") else f"{name}.exe"
+    for base_var in _SEARCH_DIRS:
+        base = os.path.expandvars(base_var)
+        if not os.path.isdir(base):
+            continue
+        for entry in os.listdir(base):
+            full = os.path.join(base, entry)
+            if os.path.isdir(full):
+                nested = os.path.join(full, target)
+                if os.path.isfile(nested):
+                    return nested
+    return None
+
 def launch_app(app_name: str) -> dict:
     key = app_name.lower().strip()
     exe = APP_MAP.get(key, app_name)
@@ -103,9 +131,13 @@ def launch_app(app_name: str) -> dict:
         if exe.endswith(":") or exe.startswith("http"):
             os.startfile(exe)
         else:
-            subprocess.Popen([exe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        logger.info("Launched: %s", exe)
-        return {"success": True, "launched": exe}
+            resolved = _resolve_exe(exe)
+            if resolved:
+                subprocess.Popen([resolved], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                subprocess.Popen([exe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        logger.info("Launched: %s", resolved or exe)
+        return {"success": True, "launched": resolved or exe}
     except Exception as e:
         logger.error("launch_app failed: %s", e)
         return {"error": str(e)}

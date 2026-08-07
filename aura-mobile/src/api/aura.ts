@@ -331,6 +331,14 @@ export async function selectVoice(voice: string) {
   return res.json();
 }
 
+export async function speak(text: string) {
+  const res = await request('/speak', {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  });
+  return res.json();
+}
+
 // ── Briefing ─────────────────────────────────────────────────────────
 
 export async function triggerBriefing() {

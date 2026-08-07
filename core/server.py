@@ -4,9 +4,13 @@ import asyncio
 import json
 import logging
 import os
+import re
 import socket
+import subprocess
+import sys
 import threading
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -14,9 +18,10 @@ import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from core.config import SERVER_HOST, SERVER_PORT, UI_SOCKET_PORT, MOBILE_API_KEY
+from core.config import SERVER_HOST, SERVER_PORT, UI_SOCKET_PORT, MOBILE_API_KEY, ISLAND_UI_DIR
 from core import agent
 from memory import chroma_store
 from memory.store import init_store, get_store
@@ -157,6 +162,11 @@ async def lifespan(app: FastAPI):
     from tools import tracker
     tracker.start()
 
+    # Wire agent job + pending-action stores to the WS broadcaster
+    from core import jobs, pending
+    jobs.set_broadcaster(ws_manager.broadcast_sync)
+    pending.set_broadcaster(ws_manager.broadcast_sync)
+
     # Pre-load Whisper model so first STT request is instant
     try:
         from voice.stt import load_whisper
@@ -181,6 +191,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+SCREENSHOTS_DIR = Path(__file__).resolve().parent.parent / "data" / "screenshots"
+SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/screenshots", StaticFiles(directory=str(SCREENSHOTS_DIR)), name="screenshots")
 
 # ── Mobile API key auth ─────────────────────────────────────────────────────────
 # If MOBILE_API_KEY is set, all non-health routes require Authorization header.
@@ -308,10 +322,51 @@ class STTBase64Request(BaseModel):
     audio: str
     format: str = "wav"
 
+class DictationRequest(BaseModel):
+    ptt: bool = False
+    clean: bool = True
+
+class LookRequest(BaseModel):
+    region: Optional[int] = None
+
+class TranscriptToggleRequest(BaseModel):
+    enabled: bool
+
+class SearchRequest(BaseModel):
+    q: str
+
 class ActionRequest(BaseModel):
     action: str
 
+class OpenFileRequest(BaseModel):
+    path: str
+
+class MacroNameRequest(BaseModel):
+    name: str
+
+class MacroStartRequest(BaseModel):
+    countdown: int = 5
+
 _FRIENDS_PATH = Path(__file__).parent.parent / "data" / "friends.json"
+
+
+# ── Local transcript logging (privacy: on-device only) ────────────────────────
+
+_transcript_lock = threading.Lock()
+
+
+def _append_transcript(line: str) -> None:
+    from core.config import is_save_transcripts, TRANSCRIPTS_DIR
+    if not is_save_transcripts():
+        return
+    try:
+        with _transcript_lock:
+            TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+            day = datetime.now().strftime("%Y-%m-%d")
+            with open(TRANSCRIPTS_DIR / f"{day}.txt", "a", encoding="utf-8") as f:
+                f.write(line)
+    except Exception:
+        pass
 
 
 def _load_friends() -> list[dict]:
@@ -368,6 +423,7 @@ class TaskCreate(BaseModel):
     color: str = "#00A0FF"
     time: str = ""
     date: str = ""
+    done: bool = False
 
 
 class TaskUpdate(BaseModel):
@@ -376,6 +432,7 @@ class TaskUpdate(BaseModel):
     color: str | None = None
     time: str | None = None
     date: str | None = None
+    done: bool | None = None
 
 
 def _next_id(tasks: list[dict]) -> str:
@@ -405,6 +462,9 @@ def _load_tasks() -> list[dict]:
         if "date" not in t:
             t["date"] = ""
             changed = True
+        if "done" not in t:
+            t["done"] = False
+            changed = True
     if changed:
         _save_tasks(tasks)
     return tasks
@@ -433,6 +493,7 @@ async def create_task(req: TaskCreate):
         "color": req.color,
         "time": req.time,
         "date": req.date,
+        "done": req.done,
     }
     tasks.append(new)
     _save_tasks(tasks)
@@ -464,6 +525,8 @@ async def update_task(task_id: str, req: TaskUpdate):
                 t["time"] = req.time
             if req.date is not None:
                 t["date"] = req.date
+            if req.done is not None:
+                t["done"] = req.done
             _save_tasks(tasks)
             return {"task": t}
     return {"error": "Task not found"}, 404
@@ -582,6 +645,8 @@ async def chat(req: ChatRequest):
         return StreamingResponse(briefing_gen(), media_type="text/plain")
 
     # Normal chat path
+    _append_transcript(f"[{datetime.now().strftime('%H:%M')}] User: {req.message}\n")
+
     async def generate():
         full_response = []
         try:
@@ -595,6 +660,8 @@ async def chat(req: ChatRequest):
         except Exception as e:
             logger.error("Stream error: %s", e)
             yield "\n[Aura encountered an error. Please try again.]"
+
+        _append_transcript(f"[{datetime.now().strftime('%H:%M')}] Aura: {''.join(full_response)}\n")
 
         if req.speak:
             _speak_response("".join(full_response))
@@ -888,11 +955,304 @@ async def unified_action(req: ActionRequest):
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, launch_app, "vscode")
     elif act == "screenshot":
-        return {"success": True, "message": "Screenshot captured and saved to memory."}
+        import pyautogui
+        ts = asyncio.get_running_loop().time()
+        filename = f"screenshot_{int(ts)}.png"
+        filepath = SCREENSHOTS_DIR / filename
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, lambda: pyautogui.screenshot(str(filepath)))
+        url = f"/screenshots/{filename}"
+        return {"success": True, "message": "Screenshot captured.", "filePath": url, "localPath": str(filepath)}
     elif act == "clear-cache":
         return {"success": True, "message": "System cache cleared. 4.2 GB VRAM freed."}
     else:
         return {"error": f"Unknown action: {act}"}
+
+@app.post("/action/open-file")
+async def open_file(req: OpenFileRequest):
+    import subprocess
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, lambda: subprocess.Popen(["explorer", "/select,", req.path]))
+    return {"success": True}
+
+# ── Macro Recorder ──────────────────────────────────────────────────────────
+
+_recorder: "MacroRecorder | None" = None
+_playing_macro: str | None = None
+_macro_play_lock = threading.Lock()
+
+@app.post("/api/macros/record/start")
+async def macro_record_start(req: MacroStartRequest):
+    global _recorder
+    from scripts.macro_recorder import MacroRecorder
+    if _recorder is None:
+        _recorder = MacroRecorder()
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _recorder.start_recording, req.countdown)
+    return {"success": True, "countdown": req.countdown}
+
+@app.post("/api/macros/record/stop")
+async def macro_record_stop(req: MacroNameRequest):
+    global _recorder
+    if _recorder is None:
+        return {"success": False, "error": "No active recording"}
+    loop = asyncio.get_running_loop()
+    path = await loop.run_in_executor(None, _recorder.stop_recording, req.name)
+    _recorder = None
+    return {"success": True, "path": str(path)}
+
+@app.get("/api/macros")
+async def macro_list():
+    from scripts.macro_recorder import MacroRecorder
+    r = MacroRecorder()
+    return {"macros": r.list_macros()}
+
+@app.post("/api/macros/{macro_id}/play")
+async def macro_play(macro_id: str):
+    global _playing_macro
+    with _macro_play_lock:
+        if _playing_macro is not None:
+            return {"success": False, "error": f"Macro '{_playing_macro}' is already playing"}
+        _playing_macro = macro_id
+    threading.Thread(target=_play_macro_thread, args=(macro_id,), daemon=True).start()
+    return {"success": True, "playing": True}
+
+def _play_macro_thread(macro_id: str):
+    global _playing_macro
+    try:
+        from scripts.macro_recorder import MacroRecorder
+        MacroRecorder().play(macro_id)
+    except Exception:
+        logger.exception("Macro play failed: %s", macro_id)
+    finally:
+        with _macro_play_lock:
+            _playing_macro = None
+
+@app.delete("/api/macros/{macro_id}")
+async def macro_delete(macro_id: str):
+    from scripts.macro_recorder import MacroRecorder
+    r = MacroRecorder()
+    ok = r.delete_macro(macro_id)
+    return {"success": ok}
+
+
+# ── Activity Tracker ────────────────────────────────────────────────────────
+
+_tracker: "ActivityTracker | None" = None
+
+@app.post("/api/activity/start")
+async def activity_start():
+    global _tracker
+    from scripts.activity_tracker import ActivityTracker
+    if _tracker is None:
+        _tracker = ActivityTracker()
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _tracker.start)
+    return {"success": True}
+
+@app.post("/api/activity/stop")
+async def activity_stop():
+    global _tracker
+    if _tracker is None:
+        return {"success": False, "error": "No active tracking"}
+    loop = asyncio.get_running_loop()
+    path = await loop.run_in_executor(None, _tracker.stop)
+    _tracker = None
+    return {"success": True, "path": str(path)}
+
+@app.get("/api/activity/sessions")
+async def activity_sessions():
+    from scripts.activity_tracker import ActivityTracker
+    t = ActivityTracker()
+    sessions = []
+    data_dir = Path(__file__).resolve().parent.parent / "data" / "activity"
+    for f in sorted(data_dir.glob("session_*.json"), reverse=True):
+        if "_summary" in f.stem:
+            continue
+        try:
+            with open(f) as fh:
+                data = json.load(fh)
+            sessions.append({
+                "id": f.stem,
+                "name": data.get("session", f.stem),
+                "entryCount": len(data.get("entries", [])),
+                "path": str(f),
+            })
+        except Exception:
+            pass
+    return {"sessions": sessions}
+
+@app.get("/api/activity/sessions/{session_id}")
+async def activity_session(session_id: str):
+    data_dir = Path(__file__).resolve().parent.parent / "data" / "activity"
+    path = data_dir / f"{session_id}.json"
+    if not path.exists():
+        return {"error": "Session not found"}
+    with open(path) as f:
+        data = json.load(f)
+    return data
+
+
+# ── Dynamic Island (PySide6 overlay) ────────────────────────────────────────────
+
+_island_proc: "subprocess.Popen | None" = None
+_island_pid: int | None = None
+_island_lock = threading.Lock()
+
+
+def _island_pid_file() -> Path:
+    return Path(__file__).resolve().parent.parent / "data" / "island.pid"
+
+
+def _write_island_pid(pid: int) -> None:
+    try:
+        _island_pid_file().write_text(str(pid))
+    except Exception:
+        pass
+
+
+def _read_island_pid() -> int | None:
+    try:
+        return int(_island_pid_file().read_text().strip())
+    except Exception:
+        return None
+
+
+def _clear_island_pid() -> None:
+    try:
+        _island_pid_file().unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        import psutil
+        return psutil.pid_exists(pid)
+    except Exception:
+        return False
+
+
+def _island_running() -> bool:
+    global _island_proc, _island_pid
+    if _island_proc is not None:
+        if _island_proc.poll() is None:
+            return True
+        _island_proc = None
+    if _island_pid is not None and _pid_alive(_island_pid):
+        return True
+    _island_pid = None
+    pid = _read_island_pid()
+    if pid is not None and _pid_alive(pid):
+        _island_pid = pid
+        return True
+    return False
+
+
+def _find_island_exe(ui_dir: Path) -> Path | None:
+    for candidate in [
+        ui_dir / "aura_island.exe",
+        ui_dir / "dist" / "aura_island.exe",
+        ui_dir / "aura_island" / "aura_island.exe",
+    ]:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _start_island() -> tuple[bool, str]:
+    global _island_proc, _island_pid
+    with _island_lock:
+        if _island_running():
+            return False, "already running"
+        ui_dir = ISLAND_UI_DIR.parent
+        if not ui_dir.is_dir():
+            return False, f"UI dir not found: {ui_dir}"
+        exe = _find_island_exe(ui_dir)
+        if exe is not None:
+            cmd = [str(exe)]
+            cwd = str(exe.parent)
+        else:
+            cmd = [sys.executable, "-m", "aura_island.main"]
+            cwd = str(ui_dir)
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=cwd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                text=True,
+            )
+        except Exception as e:
+            return False, f"failed to launch: {e}"
+        try:
+            proc.wait(timeout=0.5)
+        except subprocess.TimeoutExpired:
+            _island_proc = proc
+            _island_pid = proc.pid
+            _write_island_pid(proc.pid)
+            return True, "started"
+        detail = ""
+        try:
+            if proc.stderr:
+                detail = proc.stderr.read().strip()
+            if not detail and proc.stdout:
+                detail = proc.stdout.read().strip()
+        except Exception:
+            pass
+        return False, detail or f"exited with code {proc.returncode}"
+
+def _stop_island() -> tuple[bool, str]:
+    global _island_proc, _island_pid
+    with _island_lock:
+        if _island_proc is not None and _island_proc.poll() is None:
+            try:
+                _island_proc.terminate()
+                _island_proc.wait(timeout=5)
+            except Exception:
+                try:
+                    _island_proc.kill()
+                except Exception:
+                    pass
+            _island_proc = None
+            _island_pid = None
+            _clear_island_pid()
+            return True, "stopped"
+        _island_proc = None
+        pid = _island_pid if _island_pid is not None else _read_island_pid()
+        if pid is not None and _pid_alive(pid):
+            try:
+                import psutil
+                p = psutil.Process(pid)
+                p.terminate()
+                try:
+                    p.wait(timeout=5)
+                except Exception:
+                    p.kill()
+            except Exception:
+                pass
+            _island_pid = None
+            _clear_island_pid()
+            return True, "stopped"
+        _island_pid = None
+        _clear_island_pid()
+        return False, "not running"
+
+@app.get("/api/island/status")
+async def island_status():
+    return {"running": _island_running()}
+
+@app.post("/api/island/start")
+async def island_start():
+    ok, msg = await asyncio.get_running_loop().run_in_executor(None, _start_island)
+    return {"success": ok, "message": msg}
+
+@app.post("/api/island/stop")
+async def island_stop():
+    ok, msg = await asyncio.get_running_loop().run_in_executor(None, _stop_island)
+    return {"success": ok, "message": msg}
+
 
 @app.post("/system/lock")
 async def system_lock():
@@ -1343,6 +1703,257 @@ async def speech_to_text_base64(req: STTBase64Request):
             os.unlink(tmp.name)
         except Exception:
             pass
+
+
+# ── Agent Jobs (VoiceOS-style agent tray) ─────────────────────────────────────
+
+@app.get("/agent/jobs")
+async def agent_jobs(limit: int = 50):
+    from core import jobs
+    return {"jobs": jobs.list_jobs(limit)}
+
+
+# ── Pending actions ("Nothing sends until you say so") ────────────────────────
+
+@app.get("/pending")
+async def pending_list():
+    from core import pending
+    return {"pending": pending.list_pending()}
+
+
+@app.post("/pending/{item_id}/approve")
+async def pending_approve(item_id: str):
+    from core import pending
+    return pending.approve(item_id)
+
+
+@app.post("/pending/{item_id}/cancel")
+async def pending_cancel(item_id: str):
+    from core import pending
+    return pending.cancel(item_id)
+
+
+# ── Dictation (talk instead of typing) ────────────────────────────────────────
+
+_FILLER_RE = re.compile(r"\b(um|uh|er|erm|hmm|like|you know|i mean)\b[, ]*", re.IGNORECASE)
+
+
+def _clean_dictation_text(text: str) -> str:
+    """Quick cleanup — filler removal + sentence casing. LLM polish optional."""
+    cleaned = _FILLER_RE.sub(" ", text)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+    if cleaned and cleaned[-1] not in ".!?":
+        cleaned += "."
+    return cleaned[:500]
+
+
+def _dictation_run(ptt: bool, clean: bool) -> dict:
+    """Record one utterance, transcribe, clean, and type into the focused app."""
+    from voice import pipeline as vp
+    vp.set_dictation_active(True)
+    wav_path = None
+    try:
+        wav_path = vp.record_speech(ptt_mode=ptt)
+        if not wav_path:
+            return {"success": False, "error": "Nothing heard", "text": ""}
+
+        from voice.stt import load_whisper, transcribe
+        load_whisper("base")
+        raw = (transcribe(wav_path) or "").strip()
+        if not raw:
+            return {"success": False, "error": "Could not transcribe", "text": ""}
+
+        text = _clean_dictation_text(raw) if clean else raw
+
+        typed_into = ""
+        try:
+            from tools.tracker import _get_foreground_window_title
+            typed_into = _get_foreground_window_title() or ""
+        except Exception:
+            pass
+
+        from tools.system import type_text
+        type_text(text)
+
+        ws_manager.broadcast_sync(f"DICTATION:{json.dumps({'text': text, 'window': typed_into}, ensure_ascii=False)}")
+        return {"success": True, "text": text, "raw": raw, "typed_into": typed_into}
+    except Exception as e:
+        logger.error("Dictation failed: %s", e)
+        return {"success": False, "error": str(e), "text": ""}
+    finally:
+        if wav_path:
+            try:
+                os.unlink(wav_path)
+            except Exception:
+                pass
+        vp.set_dictation_active(False)
+
+
+@app.post("/dictation")
+async def dictation(req: DictationRequest):
+    """Record speech, transcribe, clean, and type it into the focused window."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: _dictation_run(req.ptt, req.clean))
+
+
+# ── Look (cursor-aware screen context) ────────────────────────────────────────
+
+def _look_run(region: int = 480) -> dict:
+    """Capture the screen around the cursor, OCR it, plus window + clipboard."""
+    import pyautogui
+
+    result = {"window": "", "ocr": "", "clipboard": "", "success": True}
+    try:
+        from tools.tracker import _get_foreground_window_title
+        result["window"] = _get_foreground_window_title() or ""
+    except Exception:
+        pass
+
+    try:
+        from tools.system import clipboard_paste
+        clip = clipboard_paste()
+        if isinstance(clip, dict):
+            result["clipboard"] = str(clip.get("text", clip.get("error", "")))[:1000]
+    except Exception:
+        pass
+
+    try:
+        import pytesseract
+        tesseract_path = Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
+        if tesseract_path.exists():
+            pytesseract.pytesseract.tesseract_cmd = str(tesseract_path)
+        x, y = pyautogui.position()
+        w = h = max(240, min(region, 1200))
+        left = max(0, int(x - w / 2))
+        top = max(0, int(y - h / 2))
+        shot = pyautogui.screenshot(region=(left, top, w, h))
+        result["ocr"] = pytesseract.image_to_string(shot).strip()[:1500]
+    except Exception as e:
+        result["ocr_error"] = str(e)
+    return result
+
+
+@app.post("/look")
+async def look(req: LookRequest):
+    """Screen context under the cursor: OCR + foreground window + clipboard."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: _look_run(req.region or 480))
+
+
+# ── Universal search (files, vault, notes, tasks, web) ────────────────────────
+
+def _scan_files_for(q: str, limit: int = 8) -> list[dict]:
+    """Shallow scan of common user folders for matching names."""
+    ql = q.lower()
+    hits = []
+    roots = [
+        Path.home() / "Desktop",
+        Path.home() / "Documents",
+        Path.home() / "Downloads",
+    ]
+    for root in roots:
+        if not root.exists():
+            continue
+        try:
+            for p in root.iterdir():
+                if ql in p.name.lower():
+                    hits.append({
+                        "type": "file",
+                        "title": p.name,
+                        "subtitle": str(p),
+                        "path": str(p),
+                    })
+                    if len(hits) >= limit:
+                        return hits
+        except Exception:
+            continue
+    return hits
+
+
+def _universal_search_sync(q: str) -> dict:
+    from tools.system import list_tasks
+    ql = q.lower()
+    results = {"files": [], "vault": [], "tasks": [], "notes": []}
+
+    results["files"] = _scan_files_for(q)
+
+    try:
+        from memory.vault import search as vault_search
+        v = vault_search(q)
+        results["vault"] = [
+            {"type": "vault", "title": r.get("path", r.get("title", "")), "subtitle": r.get("snippet", "")[:120], "path": r.get("path", "")}
+            for r in (v.get("results") if isinstance(v, dict) else v or [])[:5]
+        ]
+    except Exception:
+        pass
+
+    try:
+        tasks = list_tasks()
+        task_list = tasks.get("tasks", tasks) if isinstance(tasks, dict) else tasks or []
+        results["tasks"] = [
+            {"type": "task", "title": t.get("name", ""), "subtitle": t.get("time", "") or t.get("date", ""), "id": t.get("id", "")}
+            for t in task_list if ql in (t.get("name", "") or "").lower()
+        ][:5]
+    except Exception:
+        pass
+
+    try:
+        notes_file = Path(__file__).resolve().parent.parent / "data" / "notes.json"
+        if notes_file.exists():
+            notes = json.loads(notes_file.read_text(encoding="utf-8"))
+            if isinstance(notes, dict):
+                notes = notes.get("notes", [])
+            results["notes"] = [
+                {"type": "note", "title": n.get("title", n.get("name", "")), "subtitle": (n.get("content", "") or "")[:120], "id": n.get("id", "")}
+                for n in notes if ql in (n.get("title", n.get("name", "")) or "").lower()
+            ][:5]
+    except Exception:
+        pass
+
+    return results
+
+
+@app.get("/universal/search")
+async def universal_search(q: str = ""):
+    q = q.strip()
+    if not q:
+        return {"results": {"files": [], "vault": [], "tasks": [], "notes": [], "web": []}}
+
+    loop = asyncio.get_running_loop()
+    sync = await loop.run_in_executor(None, lambda: _universal_search_sync(q))
+
+    web_results = []
+    try:
+        from tools.web import web_search
+        w = await web_search(q)
+        if isinstance(w, dict):
+            items = w.get("results", [])
+            web_results = [
+                {"type": "web", "title": r.get("title", ""), "subtitle": r.get("url", ""), "url": r.get("url", "")}
+                for r in items[:3]
+            ]
+    except Exception:
+        pass
+    sync["web"] = web_results
+    return {"results": sync}
+
+
+# ── Transcripts (privacy) ─────────────────────────────────────────────────────
+
+@app.get("/transcripts")
+async def transcripts_list():
+    from core.config import is_save_transcripts, TRANSCRIPTS_DIR
+    files = []
+    if TRANSCRIPTS_DIR.exists():
+        files = sorted((p.name for p in TRANSCRIPTS_DIR.glob("*.txt")), reverse=True)
+    return {"enabled": is_save_transcripts(), "files": files}
+
+
+@app.post("/transcripts/toggle")
+async def transcripts_toggle(req: TranscriptToggleRequest):
+    from core.config import set_save_transcripts
+    ok = set_save_transcripts(req.enabled)
+    return {"success": ok, "enabled": req.enabled}
 
 
 # ── Entry ─────────────────────────────────────────────────────────────────────

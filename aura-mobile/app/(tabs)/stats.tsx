@@ -1,7 +1,9 @@
 import { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, SafeAreaView, RefreshControl, ScrollView, Platform } from 'react-native';
+import { View, Text, Pressable, StyleSheet, SafeAreaView, RefreshControl, ScrollView, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from 'expo-router';
+import { useNavigation } from '@react-navigation/native';
+import type { DrawerNavigationProp } from '@react-navigation/drawer';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { getStats } from '../../src/api/aura';
@@ -56,6 +58,7 @@ function StatCard({
 }
 
 export default function StatsScreen() {
+  const navigation = useNavigation<DrawerNavigationProp<{}>>();
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -91,6 +94,9 @@ export default function StatsScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
+        <Pressable onPress={() => navigation.openDrawer()} style={styles.menuBtn}>
+          <MaterialIcons name="menu" size={20} color={colors.onSurface} />
+        </Pressable>
         <Text style={styles.headerTitle}>System Stats</Text>
         <View style={styles.livePill}>
           <View style={[styles.liveDot, { backgroundColor: colors.tertiary }]} />
@@ -175,11 +181,16 @@ export default function StatsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgDeep },
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingVertical: 14,
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 12, paddingTop: 28,
     borderBottomWidth: 1, borderBottomColor: colors.glassBorder,
   },
-  headerTitle: { ...typography.headlineMd, color: colors.onSurface, fontSize: 18, letterSpacing: 1 },
+  menuBtn: {
+    width: 40, height: 40, borderRadius: radius.input,
+    backgroundColor: colors.glassBg, borderWidth: 1, borderColor: colors.glassBorder,
+    alignItems: 'center', justifyContent: 'center', marginRight: 12,
+  },
+  headerTitle: { ...typography.headlineMd, color: colors.onSurface, fontSize: 18, letterSpacing: 1, flex: 1 },
   livePill: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(63,185,80,0.08)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   liveDot: { width: 6, height: 6, borderRadius: 3 },
   liveText: { fontSize: 11, fontWeight: '700' },

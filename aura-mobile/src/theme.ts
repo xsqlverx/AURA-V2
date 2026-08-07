@@ -1,80 +1,60 @@
 import { Platform } from 'react-native';
+import { palette, glass, text, backgrounds, semantic, accent, glow } from './tokens/colors';
+import { spacing as spaceTokens } from './tokens/spacing';
+import { radius as radiusTokens } from './tokens/radius';
+import { typography as typeTokens, fontFamily } from './tokens/typography';
+
+// ── Backward-compatible re-exports ─────────────────────────────────────────
+// Every existing import from '../src/theme' continues to work.
+// New code should import from '../src/tokens' or use useTheme().
 
 export const colors = {
-  bgDeep: '#050505',
-  bgPrimary: '#0A0A0A',
-  bgSurface: '#0F0F0F',
-  bgCard: '#141414',
-  onSurface: '#FFFFFF',
-  onSurfaceSecondary: 'rgba(255,255,255,0.7)',
-  onSurfaceMuted: 'rgba(255,255,255,0.4)',
-  onSurfaceDim: 'rgba(255,255,255,0.2)',
-  primary: '#00F2FF',
-  secondary: '#BC8CFF',
-  tertiary: '#3FB950',
-  error: '#FF453A',
-  warning: '#FF9F0A',
-  glassBg: 'rgba(255,255,255,0.05)',
-  glassBorder: 'rgba(255,255,255,0.1)',
+  bgDeep: backgrounds.deep,
+  bgPrimary: backgrounds.primary,
+  bgSurface: backgrounds.surface,
+  bgCard: backgrounds.card,
+  onSurface: text.primary,
+  onSurfaceSecondary: text.secondary,
+  onSurfaceMuted: text.tertiary,
+  onSurfaceDim: text.disabled,
+  primary: accent.cyan,
+  secondary: accent.purple,
+  tertiary: semantic.success,
+  error: semantic.error,
+  warning: semantic.warning,
+  glassBg: glass.bg,
+  glassBorder: glass.border,
   glassBlur: 40,
-  glowCyan: 'rgba(0,242,255,0.2)',
-  glowPurple: 'rgba(188,140,255,0.2)',
+  glowCyan: glow.subtle,
+  glowPurple: glow.memory,
   glowSpread: 40,
 };
 
 export const spacing = {
-  xs: 4,
-  sm: 8,
-  md: 12,
-  lg: 24,
-  xl: 48,
-  xxl: 80,
+  xs: spaceTokens.space4,
+  sm: spaceTokens.space8,
+  md: spaceTokens.space12,
+  lg: spaceTokens.space24,
+  xl: spaceTokens.space48,
+  xxl: spaceTokens.space80,
 };
 
 export const radius = {
-  card: 24,
-  button: 9999,
-  modal: 32,
-  input: 24,
+  card: radiusTokens.lg,
+  button: radiusTokens.full,
+  modal: radiusTokens.xl,
+  input: radiusTokens.md,
 };
 
 export const typography = {
-  displayLg: {
-    fontFamily: 'PlusJakartaSans_700Bold',
-    fontSize: 64,
-    lineHeight: 72,
-    letterSpacing: -0.04,
-  },
-  headlineLg: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
-    fontSize: 40,
-    lineHeight: 48,
-    letterSpacing: -0.02,
-  },
-  headlineMd: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
-    fontSize: 24,
-    lineHeight: 32,
-  },
-  bodyMd: {
-    fontFamily: 'PlusJakartaSans_400Regular',
-    fontSize: 16,
-    lineHeight: 24,
-  },
+  displayLg: typeTokens.display,
+  headlineLg: typeTokens.heading1,
+  headlineMd: typeTokens.heading2,
+  bodyMd: typeTokens.body,
   labelMd: {
-    fontFamily: 'PlusJakartaSans_500Medium',
-    fontSize: 14,
-    lineHeight: 20,
-    letterSpacing: 0.05,
-    textTransform: 'uppercase' as const,
+    ...typeTokens.label,
+    fontFamily: fontFamily.medium,
   },
-  labelSm: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  mono: {
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontSize: 13,
-  },
+  labelSm: typeTokens.caption,
+  mono: typeTokens.mono,
 };

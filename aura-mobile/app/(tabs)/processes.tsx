@@ -4,6 +4,8 @@ import {
   SafeAreaView, RefreshControl, Alert, Platform,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
+import { useNavigation } from '@react-navigation/native';
+import type { DrawerNavigationProp } from '@react-navigation/drawer';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { getProcesses, killProcess } from '../../src/api/aura';
@@ -14,6 +16,7 @@ import GlassInput from '../../src/components/GlassInput';
 type Proc = { pid: number; name: string };
 
 export default function ProcessesScreen() {
+  const navigation = useNavigation<DrawerNavigationProp<{}>>();
   const [processes, setProcesses] = useState<Proc[]>([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState('');
@@ -86,7 +89,10 @@ export default function ProcessesScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <View>
+        <Pressable onPress={() => navigation.openDrawer()} style={styles.menuBtn}>
+          <MaterialIcons name="menu" size={20} color={colors.onSurface} />
+        </Pressable>
+        <View style={styles.headerText}>
           <Text style={styles.headerTitle}>Processes</Text>
           <Text style={styles.headerSub}>{count} running</Text>
         </View>
@@ -132,10 +138,16 @@ export default function ProcessesScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgDeep },
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingVertical: 14,
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 12, paddingTop: 28,
     borderBottomWidth: 1, borderBottomColor: colors.glassBorder,
   },
+  menuBtn: {
+    width: 40, height: 40, borderRadius: radius.input,
+    backgroundColor: colors.glassBg, borderWidth: 1, borderColor: colors.glassBorder,
+    alignItems: 'center', justifyContent: 'center', marginRight: 12,
+  },
+  headerText: { flex: 1 },
   headerTitle: { ...typography.headlineMd, color: colors.onSurface, fontSize: 18, letterSpacing: 1 },
   headerSub: { color: colors.onSurface, fontSize: 11, fontWeight: '500', marginTop: 2 },
   searchRow: { flexDirection: 'row', gap: spacing.sm, margin: spacing.lg, alignItems: 'center' },

@@ -6,6 +6,8 @@
     "@expo-google-fonts/plus-jakarta-sans": "^0.4.2",
     "@expo/vector-icons": "^15.0.2",
     "@react-native-community/slider": "5.2.0",
+    "@react-navigation/drawer": "^7.13.4",
+    "@react-navigation/native": "^7.3.13",
     "expo": "~56.0.12",
     "expo-audio": "~56.0.12",
     "expo-blur": "~56.0.3",

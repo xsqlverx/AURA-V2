@@ -10,6 +10,10 @@ import {
   PlusJakartaSans_700Bold,
 } from '@expo-google-fonts/plus-jakarta-sans';
 import { NavigationBar } from 'expo-navigation-bar';
+import { ThemeProvider } from '../src/theme/ThemeContext';
+import { GlanceProvider } from '../src/components/glances';
+import { AmbientProvider, AmbientEventWiring, AmbientContextUpdater } from '../src/ambient';
+import { DesktopPresenceProvider } from '../src/desktop';
 import { useSettings } from '../src/stores/settingsStore';
 import { useWs } from '../src/stores/wsStore';
 import { useAuth } from '../src/stores/authStore';
@@ -68,7 +72,6 @@ export default function RootLayout() {
     return () => { wsDisconnect(); };
   }, [isLoaded, backendUrl]);
 
-  // Show loading while fonts load
   if (!fontsLoaded) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.bgDeep, justifyContent: 'center', alignItems: 'center' }}>
@@ -81,41 +84,47 @@ export default function RootLayout() {
   const showContent = booted && !locked;
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bgDeep }}>
-      <StatusBar style="light" />
-      <NavigationBar style="light" />
+    <ThemeProvider>
+      <View style={{ flex: 1, backgroundColor: colors.bgDeep }}>
+        <StatusBar style="light" />
+        <NavigationBar style="light" />
 
-      {/* Boot sequence overlay */}
-      {!booted && <BootSequence onComplete={() => setBooted(true)} />}
+        {/* Boot sequence overlay */}
+        {!booted && <BootSequence onComplete={() => setBooted(true)} />}
 
-      {/* Auth lock overlay */}
-      {booted && locked && <LockScreen />}
+        {/* Auth lock overlay */}
+        {booted && locked && <LockScreen />}
 
-      {/* Main app */}
-      {showContent && (
-        <Stack
-          screenOptions={{
-            headerStyle: { backgroundColor: colors.bgDeep },
-            headerTintColor: colors.primary,
-            headerTitleStyle: { fontWeight: '600' },
-            contentStyle: { backgroundColor: colors.bgDeep },
-          }}
-        >
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen
-            name="security"
-            options={{ title: 'Security' }}
-          />
-          <Stack.Screen
-            name="setup"
-            options={{ headerShown: false, presentation: 'fullScreenModal' }}
-          />
-          <Stack.Screen
-            name="files"
-            options={{ title: 'Files', headerShown: true }}
-          />
-        </Stack>
-      )}
-    </View>
+        {/* Main app */}
+        {showContent && (
+          <AmbientProvider>
+            <DesktopPresenceProvider>
+            <GlanceProvider>
+              <AmbientContextUpdater />
+              <AmbientEventWiring />
+              <Stack
+              screenOptions={{
+                headerStyle: { backgroundColor: colors.bgDeep },
+                headerTintColor: colors.primary,
+                headerTitleStyle: { fontWeight: '600' },
+                contentStyle: { backgroundColor: colors.bgDeep },
+              }}
+            >
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen
+                name="security"
+                options={{ title: 'Security' }}
+              />
+              <Stack.Screen
+                name="setup"
+                options={{ headerShown: false, presentation: 'fullScreenModal' }}
+              />
+            </Stack>
+          </GlanceProvider>
+            </DesktopPresenceProvider>
+          </AmbientProvider>
+        )}
+      </View>
+    </ThemeProvider>
   );
 }

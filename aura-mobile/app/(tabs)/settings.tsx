@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { View, Text, Pressable, StyleSheet, SafeAreaView, Alert, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useNavigation } from '@react-navigation/native';
+import type { DrawerNavigationProp } from '@react-navigation/drawer';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useSettings } from '../../src/stores/settingsStore';
 import { getHealth } from '../../src/api/aura';
@@ -11,6 +13,7 @@ import GlassInput from '../../src/components/GlassInput';
 
 export default function SettingsScreen() {
   const router = useRouter();
+  const navigation = useNavigation<DrawerNavigationProp<{}>>();
   const { backendUrl, apiKey, save } = useSettings();
   const [url, setUrl] = useState('');
   const [key, setKey] = useState('');
@@ -56,6 +59,9 @@ export default function SettingsScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
+        <Pressable onPress={() => navigation.openDrawer()} style={styles.menuBtn}>
+          <MaterialIcons name="menu" size={20} color={colors.onSurface} />
+        </Pressable>
         <Text style={styles.headerTitle}>Settings</Text>
       </View>
       <View style={styles.content}>
@@ -161,9 +167,14 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgDeep },
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingVertical: 14,
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 12, paddingTop: 28,
     borderBottomWidth: 1, borderBottomColor: colors.glassBorder,
+  },
+  menuBtn: {
+    width: 40, height: 40, borderRadius: radius.input,
+    backgroundColor: colors.glassBg, borderWidth: 1, borderColor: colors.glassBorder,
+    alignItems: 'center', justifyContent: 'center', marginRight: 12,
   },
   headerTitle: { ...typography.headlineMd, color: colors.onSurface, fontSize: 18, letterSpacing: 1 },
   content: { padding: spacing.lg, flex: 1, gap: spacing.lg },

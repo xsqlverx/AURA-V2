@@ -101,8 +101,10 @@ async def classify_intent(message: str) -> bool:
             ],
             max_tokens=10,
             temperature=0.0,
+            timeout=10.0,
         )
         result = response.choices[0].message.content.strip().upper()
+        logger.info("[LLM] stage=classify model=%s → %s", _CLASSIFIER_MODEL, result)
         return result == "TRUE"
     except Exception as e:
         logger.warning("Mistral classifier failed (%s), using keyword fallback", e)

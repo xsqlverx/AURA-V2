@@ -15,8 +15,9 @@ import uuid
 from pathlib import Path
 from typing import AsyncIterator
 
-from core.config import MEMORY_AUTOSAVE_INTERVAL
+from core.config import MEMORY_AUTOSAVE_INTERVAL, STAGE_CONFIRMATIONS
 from core.router import classify_intent, get_client_and_model
+from core import jobs, pending
 from memory import chroma_store
 from memory.context import get_context_block
 from memory.memory_tool import handle_memory_tool
@@ -43,6 +44,20 @@ def _scrub(text: str) -> str:
     # Strip <function=toolname>...<function=toolname> or </function> leaks
     text = re.sub(r"</?function[^>]*>", "", text, flags=re.IGNORECASE)
     return text
+
+
+def _log_usage(model: str, stage: str, usage):
+    """Log model + token usage for a completed (non-streaming) completion."""
+    if usage is None:
+        logger.info("[LLM] stage=%s model=%s (no usage info)", stage, model)
+        return
+    logger.info(
+        "[LLM] stage=%s model=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s",
+        stage, model,
+        getattr(usage, "prompt_tokens", "?"),
+        getattr(usage, "completion_tokens", "?"),
+        getattr(usage, "total_tokens", "?"),
+    )
 
 
 def _parse_native_function(text: str) -> list[dict]:
@@ -126,7 +141,7 @@ ACTIONS:
 - "search" — search vault notes (keep response SHORT — just confirm what you found)
 - "read" — read note content by title
 - "list" — list all AURA's notes
-- "create" — create a new note (title + content, written to AURA/ folder)
+- "create" — ONLY create when the user explicitly asks to save/write a note. Do NOT create notes just because the user shares facts about themselves — use the memory tool for that.
 - "append" — append content to an existing note
 - "delete" — delete an AURA note
 - "reindex" — force re-scan
@@ -236,9 +251,51 @@ async def _build_vault_context(message: str) -> str | None:
 
 # ── Tool Dispatch ─────────────────────────────────────────────────────────────
 
-async def _run_tool(name: str, args: dict) -> str:
+def _tool_human_detail(name: str, args: dict) -> str:
+    """Short human-readable label for the island's agent tray."""
+    labels = {
+        "send_whatsapp": "Message on WhatsApp",
+        "web_search": "Searching the web",
+        "open_website": "Opening website",
+        "play_youtube": "Playing YouTube",
+        "scrape_website": "Reading website",
+        "get_system_stats": "Checking system stats",
+        "launch_app": "Launching app",
+        "open_path": "Opening file",
+        "create_folder": "Creating folder",
+        "list_directory": "Listing files",
+        "create_task": "Adding task",
+        "list_tasks": "Checking tasks",
+        "delete_task": "Removing task",
+        "clipboard_copy": "Copying to clipboard",
+        "clipboard_paste": "Pasting clipboard",
+        "type_text": "Typing text",
+        "press_key": "Pressing key",
+        "execute_hotkey": "Pressing shortcut",
+        "vault": "Working in Obsidian vault",
+        "memory": "Updating memory",
+        "study": "Studying",
+        "set_volume": "Setting volume",
+        "get_volume": "Checking volume",
+        "mute_audio": "Muting audio",
+        "play_pause": "Playing/pausing media",
+        "next_track": "Next track",
+        "prev_track": "Previous track",
+        "shutdown": "Shutting down",
+        "restart": "Restarting",
+        "sleep_pc": "Sleeping PC",
+        "lock_pc": "Locking PC",
+        "cancel_shutdown": "Cancelling shutdown",
+    }
+    return labels.get(name, name.replace("_", " ").capitalize())
+
+
+async def _run_tool(name: str, args: dict, job_id: str | None = None) -> str:
     if name not in TOOL_NAMES:
         return json.dumps({"error": f"Unknown tool: {name}"})
+    idx = -1
+    if job_id:
+        idx = jobs.record_tool(job_id, name)
     try:
         match name:
             case "set_volume":              result = system.set_volume(args.get("level", 50))
@@ -254,8 +311,9 @@ async def _run_tool(name: str, args: dict) -> str:
             case "list_directory":          result = system.list_directory(args.get("dir_path", "."))
             case "web_search":              result = await web.web_search(args.get("query", ""))
             case "open_website":            result = system.open_website(args.get("url", ""))
+            case "play_youtube":            result = system.play_youtube(args.get("query", ""))
             case "open_z_agent":            result = system.open_z_agent(args.get("elaborated_prompt", ""))
-            case "scrape_website":          result = scrape_fn(args.get("url", ""))
+            case "scrape_website":          result = await scrape_fn(args.get("url", ""))
             case "get_system_stats":        result = system.get_system_stats()
             case "shutdown":                result = system.shutdown(args.get("delay_seconds", 20))
             case "restart":                 result = system.restart(args.get("delay_seconds", 30))
@@ -281,9 +339,25 @@ async def _run_tool(name: str, args: dict) -> str:
                 keys = args.get("keys", "").split("+")
                 result = system.execute_hotkey(*keys)
             case "send_whatsapp":
-                from tools.comms import send_whatsapp
+                from tools.whatsapp_web import send_whatsapp
                 contact = args.get("contact") or args.get("phone_number", "")
-                result = send_whatsapp(contact, args.get("message", ""))
+                message = args.get("message", "")
+                if STAGE_CONFIRMATIONS:
+                    item = pending.stage(
+                        app="WhatsApp",
+                        title="Send message",
+                        detail=[("To", contact), ("Message", message)],
+                        tool="send_whatsapp",
+                        payload={"contact": contact, "message": message},
+                        confirm=f"Send WhatsApp to {contact}?",
+                    )
+                    result = {
+                        "staged": True,
+                        "pending_id": item["id"],
+                        "message": f"Message to {contact} is staged and waiting for your approval.",
+                    }
+                else:
+                    result = send_whatsapp(contact, message)
             case "memory":
                 global _turns_since_memory
                 with _turns_lock:
@@ -313,9 +387,13 @@ async def _run_tool(name: str, args: dict) -> str:
             case _:
                 result = {"error": f"Unhandled tool: {name}"}
 
+        if job_id:
+            jobs.finish_tool(job_id, idx, True, _tool_human_detail(name, args))
         return json.dumps(result)
     except Exception as e:
         logger.error("Tool %s failed: %s", name, e)
+        if job_id:
+            jobs.finish_tool(job_id, idx, False, str(e))
         return json.dumps({"error": str(e)})
 
 
@@ -331,6 +409,25 @@ async def run(
     history: list[dict],
     mode: str = "deep",
 ) -> AsyncIterator[str]:
+    """Public entry point — wraps _run with agent-job tracking for the island."""
+    job_id = jobs.start_job(message)
+    chunks: list[str] = []
+    try:
+        async for chunk in _run(message, history, mode):
+            chunks.append(chunk)
+            yield chunk
+        jobs.finish_job(job_id, "done", "".join(chunks)[:500])
+    except Exception as e:
+        logger.error("Agent run failed: %s", e)
+        jobs.finish_job(job_id, "failed", str(e)[:500])
+        raise
+
+
+async def _run(
+    message: str,
+    history: list[dict],
+    mode: str = "deep",
+) -> AsyncIterator[str]:
     global _turns_since_memory
     with _turns_lock:
         _turns_since_memory += 1
@@ -338,6 +435,41 @@ async def run(
     # Step 1: Classify intent with Gemini 1.5 Flash
     needs_tools = await classify_intent(message)
     logger.info("Router: classify_intent=%s mode=%s", "TOOLS" if needs_tools else "CONVO", mode)
+
+    # ── YouTube play priority guard ─────────────────────────────────────────────
+    # Forces play_youtube whenever the user clearly wants to view video content
+    # on YouTube — either with a play verb ("play/watch/listen") or implicit
+    # intent ("latest video on youtube about X").
+    import re as _re
+    _play_verbs = ("play", "watch", "listen", "put on", "put me on", "queue")
+    _msg_l = message.lower()
+    _has_verb = any(v in _msg_l for v in _play_verbs)
+    _on_youtube = "youtube" in _msg_l or "yt" in _msg_l
+    _wants_play = bool(
+        (_has_verb and _on_youtube)
+        or ("youtube" in _msg_l and _re.search(r"\b(video|watch)\b", _msg_l))
+    )
+    if _wants_play:
+        _query = _re.sub(
+            r"^(play|watch|listen|show|find|get|give)\s+(me\s+|us\s+)?"
+            r"(a\s+|the\s+|this\s+)?(video\s+)?(on\s+youtube\s+)?(about\s+|on\s+|of\s+|for\s+)?",
+            "", _msg_l, flags=_re.IGNORECASE
+        ).strip()
+        _query = _re.sub(
+            r"^(the\s+)?(latest|next|best|newest|recent)\s+video\s+on\s+youtube\s+(about|on|of)\s+",
+            "", _query, flags=_re.IGNORECASE
+        ).strip()
+        _query = _re.sub(r"\s+on\s+youtube$", "", _query).strip()
+        _query = _re.sub(r"\s+on\s+youtube\s+", " ", _query).strip()
+        # If all that's left is filler like "about" alone, nuke it
+        _query = _re.sub(r"^(about|on|of|for)\s+", "", _query).strip()
+        logger.info("YouTube play guard → forcing play_youtube(query=%r)", _query)
+        result = system.play_youtube(_query)
+        _summary = f"Playing {_query} on YouTube 🎵" if not result.get("error") else f"Couldn't play that: {result.get('error')}"
+        chroma_store.save(f"User: {message}")
+        chroma_store.save(f"Aura: {_summary}")
+        yield _summary
+        return
 
     vault_ctx = await _build_vault_context(message)
 
@@ -352,11 +484,13 @@ async def run(
             {"role": "user", "content": message},
         ]
         client, model = get_client_and_model("convo")
+        logger.info("[LLM] stage=convo model=%s stream=True", model)
         stream = await client.chat.completions.create(
             model=model,
             messages=messages,
             stream=True,
             max_tokens=1024,
+            timeout=30.0,
         )
         full_response = []
         async for chunk in stream:
@@ -389,7 +523,9 @@ async def run(
                 messages=messages,
                 max_tokens=1024,
                 stream=False,
+                timeout=30.0,
             )
+            _log_usage(model, "tools", getattr(response, "usage", None))
         except Exception as e:
             if "429" in str(e) or "too_many_requests" in str(e):
                 logger.warning("Groq rate limited, falling back to OpenRouter.")
@@ -399,7 +535,9 @@ async def run(
                     messages=messages,
                     max_tokens=1024,
                     stream=False,
+                    timeout=30.0,
                 )
+                _log_usage(model, "tools(fallback)", getattr(response, "usage", None))
             else:
                 raise
 
@@ -424,7 +562,7 @@ async def run(
                     name = tc["function"]["name"]
                     args = json.loads(tc["function"]["arguments"])
                     logger.info("Native function call: %s(%s)", name, args)
-                    result = await _run_tool(name, args)
+                    result = await _run_tool(name, args, job_id)
                     logger.info("Native function result: %s", result)
                     messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
                 tool_rounds += 1
@@ -436,11 +574,13 @@ async def run(
                 if mode == "deep":
                     # Route through Mistral for deep summarization
                     client, model = get_client_and_model("deep")
+                    logger.info("[LLM] stage=deep-summary model=%s stream=True", model)
                     stream = await client.chat.completions.create(
                         model=model,
                         messages=messages,
                         stream=True,
                         max_tokens=1024,
+                        timeout=30.0,
                     )
                     full_response = []
                     async for chunk in stream:
@@ -465,12 +605,14 @@ async def run(
         client, model = get_client_and_model("deep")
     else:
         client, model = get_client_and_model("convo")
+    logger.info("[LLM] stage=post-tool model=%s stream=True", model)
 
     stream = await client.chat.completions.create(
         model=model,
         messages=messages,
         stream=True,
         max_tokens=1024,
+        timeout=30.0,
     )
 
     full_response = []

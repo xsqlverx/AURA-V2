@@ -12,6 +12,8 @@ import numpy as np
 import sounddevice as sd
 
 from voice import emotion
+from voice.audio_utils import generate_amplitude_payload
+from core.server import ws_manager
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,8 @@ class BaseTTSEngine:
 
         self._audio_buffer = np.array([], dtype=np.float32)
         self._buffer_lock = threading.Lock()
+
+        self._last_callback_time = time.time()
 
         self._gen_thread = threading.Thread(target=self._generator, daemon=True)
         self._gen_thread.start()
@@ -69,29 +73,38 @@ class BaseTTSEngine:
                 self._text_queue.task_done()
 
     def _audio_callback(self, outdata, frames, time_info, status):
-        wrote_audio = False
-        with self._buffer_lock:
-            while self._audio_buffer.size < frames:
-                try:
-                    chunk = self._audio_queue.get_nowait()
-                    self._audio_buffer = np.concatenate([self._audio_buffer, chunk.ravel()])
-                    self._audio_queue.task_done()
-                except queue.Empty:
-                    break
+        self._last_callback_time = time.time()
+        try:
+            wrote_audio = False
+            with self._buffer_lock:
+                while self._audio_buffer.size < frames:
+                    try:
+                        chunk = self._audio_queue.get_nowait()
+                        self._audio_buffer = np.concatenate([self._audio_buffer, chunk.ravel()])
+                        self._audio_queue.task_done()
+                    except queue.Empty:
+                        break
 
-            n = min(self._audio_buffer.size, frames)
-            if n > 0:
-                outdata[:n, 0] = self._audio_buffer[:n]
-                outdata[n:, 0] = 0.0
-                self._audio_buffer = self._audio_buffer[n:]
-                wrote_audio = True
-            else:
-                outdata[:, 0] = 0.0
+                n = min(self._audio_buffer.size, frames)
+                if n > 0:
+                    outdata[:n, 0] = self._audio_buffer[:n]
+                    outdata[n:, 0] = 0.0
+                    self._audio_buffer = self._audio_buffer[n:]
+                    wrote_audio = True
+                    try:
+                        payload = generate_amplitude_payload(outdata[:n, 0])
+                        ws_manager.broadcast_sync(payload)
+                    except Exception:
+                        pass
+                else:
+                    outdata[:, 0] = 0.0
 
-        if wrote_audio:
-            self.is_speaking.set()
-        elif self._audio_queue.empty():
-            self.is_speaking.clear()
+            if wrote_audio:
+                self.is_speaking.set()
+            elif self._audio_queue.empty():
+                self.is_speaking.clear()
+        except Exception:
+            outdata[:, 0] = 0.0
 
     def speak(self, text: str):
         if text and text.strip():
@@ -124,14 +137,38 @@ class BaseTTSEngine:
         self._paused.clear()
         self._stream.start()
 
-    def wait_until_done(self):
-        self._text_queue.join()
-        self._audio_queue.join()
-        while True:
+    def wait_until_done(self, timeout: float = 120.0):
+        import time as _time
+        deadline = _time.time() + timeout
+        while not self._text_queue.empty() and _time.time() < deadline:
+            _time.sleep(0.1)
+        while not self._audio_queue.empty() and _time.time() < deadline:
+            _time.sleep(0.1)
+        while _time.time() < deadline:
             with self._buffer_lock:
                 if self._audio_buffer.size == 0:
                     break
-            time.sleep(0.05)
+            cb_idle = _time.time() - self._last_callback_time
+            if cb_idle > 3.0:
+                logger.warning("Audio callback stopped (%.1fs idle) — force-clearing", cb_idle)
+                break
+            _time.sleep(0.05)
+        leftover = (self._audio_buffer.size > 0 or not self._audio_queue.empty())
+        if leftover:
+            if _time.time() - self._last_callback_time > 3.0:
+                logger.warning("wait_until_done force-clearing dead stream")
+                with self._buffer_lock:
+                    self._audio_buffer = np.array([], dtype=np.float32)
+                while not self._text_queue.empty():
+                    try: self._text_queue.get_nowait(); self._text_queue.task_done()
+                    except: break
+                while not self._audio_queue.empty():
+                    try: self._audio_queue.get_nowait(); self._audio_queue.task_done()
+                    except: break
+                self.is_speaking.clear()
+            else:
+                logger.info("Playback still active — waiting more")
+                self.wait_until_done(timeout=60.0)
 
     def stop(self):
         self._stop.set()
@@ -318,6 +355,8 @@ class KokoroTTSEngine(BaseTTSEngine):
 def create_engine(provider: str = "supertonic", voice: str = "F1") -> BaseTTSEngine:
     """Factory: returns the appropriate TTS engine."""
     provider = provider.lower().strip()
+
+    logger.info("Creating TTS engine: provider=%s voice=%s", provider, voice)
 
     if provider == "edge":
         return EdgeTTSEngine(voice=voice)

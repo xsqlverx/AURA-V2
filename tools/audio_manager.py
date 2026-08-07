@@ -18,6 +18,12 @@ except ImportError:
 _thread_local = threading.local()
 
 
+def _reset_com():
+    """Reset COM state so next call reinitialises."""
+    if hasattr(_thread_local, "com_initialized"):
+        del _thread_local.com_initialized
+
+
 def _get_interface():
     """Get Windows audio endpoint interface (thread-safe). Exact v1 logic."""
     if not PYCAW_AVAILABLE:
@@ -32,7 +38,15 @@ def _get_interface():
         return cast(interface, POINTER(IAudioEndpointVolume))
     except Exception as e:
         logger.error("Failed to get audio interface: %s", e)
+        _reset_com()
         return None
+
+
+def _handle_com_error(e: Exception):
+    """Reset COM if the audio device has disappeared."""
+    msg = str(e)
+    if "removed" in msg.lower() or "not found" in msg.lower() or "element not found" in msg.lower():
+        _reset_com()
 
 
 def get_volume() -> Optional[int]:
@@ -44,6 +58,7 @@ def get_volume() -> Optional[int]:
         return round(interface.GetMasterVolumeLevelScalar() * 100)
     except Exception as e:
         logger.error("get_volume failed: %s", e)
+        _handle_com_error(e)
         return None
 
 
@@ -59,6 +74,7 @@ def set_volume(level: int) -> bool:
         return True
     except Exception as e:
         logger.error("set_volume failed: %s", e)
+        _handle_com_error(e)
         return False
 
 
@@ -72,4 +88,5 @@ def mute(muted: bool = True) -> bool:
         return True
     except Exception as e:
         logger.error("mute failed: %s", e)
+        _handle_com_error(e)
         return False

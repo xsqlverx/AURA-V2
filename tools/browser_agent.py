@@ -14,59 +14,38 @@ from playwright.async_api import (
     Playwright,
     TimeoutError as PlaywrightTimeout,
 )
-from playwright.sync_api import sync_playwright
 
 logger = logging.getLogger(__name__)
 
-# ── Legacy headless scrape (sync, fire-and-forget) ────────────────────────────
 
-_sync_lock = threading.Lock()
-_sync_pw = None
-_sync_browser = None
-
-
-def _sync_browser_instance():
-    global _sync_pw, _sync_browser
-    if _sync_browser is None:
-        with _sync_lock:
-            if _sync_browser is None:
-                ctx = sync_playwright()
-                _sync_pw = ctx.start()
-                _sync_browser = _sync_pw.chromium.launch(headless=True)
-    return _sync_browser
-
-
-def scrape_website(url: str, timeout: int = 15) -> dict:
+async def scrape_website(url: str, timeout: int = 15) -> dict:
     url = (url or "").strip()
     if not url:
         return {"error": "No URL provided"}
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
-    page = None
     try:
-        browser = _sync_browser_instance()
-        page = browser.new_page()
-        page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
-        title = page.title()
-        text = page.inner_text("body") or ""
-        lines = [l.strip() for l in text.split("\n") if l.strip()]
-        cleaned = "\n".join(lines[:250])
-        return {
-            "success": True,
-            "url": url,
-            "title": title,
-            "content": cleaned,
-            "char_count": len(cleaned),
-        }
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            try:
+                page = await browser.new_page()
+                await page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
+                title = await page.title()
+                text = await page.inner_text("body") or ""
+                lines = [l.strip() for l in text.split("\n") if l.strip()]
+                cleaned = "\n".join(lines[:250])
+                return {
+                    "success": True,
+                    "url": url,
+                    "title": title,
+                    "content": cleaned,
+                    "char_count": len(cleaned),
+                }
+            finally:
+                await browser.close()
     except Exception as e:
         logger.error("scrape_website failed: %s", e)
         return {"error": str(e)}
-    finally:
-        if page:
-            try:
-                page.close()
-            except Exception:
-                pass
 
 
 # ── Interactive headed browser (async, persistent session) ────────────────────

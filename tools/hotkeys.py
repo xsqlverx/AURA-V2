@@ -1,4 +1,4 @@
-"""Global hotkeys — map Alt+M to stop TTS playback."""
+"""Global hotkeys — Alt+M to stop TTS playback, Ctrl+Alt+S to toggle flow mode."""
 
 import logging
 from threading import Thread
@@ -32,11 +32,22 @@ def _on_mute():
         logger.error("Error in hotkey handler: %s", e)
 
 
+def _on_flow_toggle():
+    try:
+        from voice.pipeline import toggle_flow_mode
+        toggle_flow_mode(tts=_tts)
+    except Exception as e:
+        logger.error("Error in flow mode hotkey handler: %s", e)
+
+
 def _run_listener():
     if not PYNPUT_AVAILABLE:
         return
     try:
-        hotkeys = keyboard.GlobalHotKeys({"<alt>+m": _on_mute})
+        hotkeys = keyboard.GlobalHotKeys({
+            "<alt>+m": _on_mute,
+            "<ctrl>+<alt>+s": _on_flow_toggle,
+        })
         hotkeys.start()
     except Exception as e:
         logger.warning("Hotkey listener failed: %s", e)

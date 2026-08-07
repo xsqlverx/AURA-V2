@@ -5,6 +5,8 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { useNavigation } from '@react-navigation/native';
+import type { DrawerNavigationProp } from '@react-navigation/drawer';
 import * as Clipboard from 'expo-clipboard';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -399,6 +401,7 @@ function NewsSection() {
 
 export default function ActionsScreen() {
   const router = useRouter();
+  const navigation = useNavigation<DrawerNavigationProp<{}>>();
   const [weather, setWeather] = useState<any>(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -422,13 +425,17 @@ export default function ActionsScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Actions</Text>
-        <View style={styles.headerLinks}>
-          <Pressable onPress={() => router.push('/(tabs)/notes')} style={styles.headerLinkBtn}>
-            <MaterialIcons name="edit-note" size={16} color={colors.primary} />
-            <Text style={styles.headerLink}>Notes</Text>
-          </Pressable>
+        <Pressable onPress={() => navigation.openDrawer()} style={styles.menuBtn}>
+          <MaterialIcons name="menu" size={20} color={colors.onSurface} />
+        </Pressable>
+        <View style={styles.headerLeft}>
+          <MaterialIcons name="bolt" size={22} color={colors.primary} />
+          <Text style={styles.headerTitle}>Actions</Text>
         </View>
+        <Pressable onPress={() => router.push('/(tabs)/notes')} style={styles.headerLinkBtn}>
+          <MaterialIcons name="edit-note" size={16} color={colors.primary} />
+          <Text style={styles.headerLink}>Notes</Text>
+        </Pressable>
       </View>
       <ScrollView
         contentContainerStyle={styles.scroll}
@@ -480,12 +487,17 @@ export default function ActionsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgDeep },
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingVertical: 14,
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 12, paddingTop: 28,
     borderBottomWidth: 1, borderBottomColor: colors.glassBorder,
   },
+  menuBtn: {
+    width: 40, height: 40, borderRadius: radius.input,
+    backgroundColor: colors.glassBg, borderWidth: 1, borderColor: colors.glassBorder,
+    alignItems: 'center', justifyContent: 'center', marginRight: 8,
+  },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
   headerTitle: { ...typography.headlineMd, color: colors.onSurface, fontSize: 18, letterSpacing: 1 },
-  headerLinks: { flexDirection: 'row', gap: 12 },
   headerLinkBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   headerLink: { color: colors.primary, fontSize: 13, fontWeight: '600' },
   scroll: { padding: spacing.lg, gap: spacing.lg },
