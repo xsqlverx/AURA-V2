@@ -1,20 +1,23 @@
 import { useState, useEffect } from 'react';
 import { View, Text, Pressable, StyleSheet, SafeAreaView, Alert, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useNavigation } from '@react-navigation/native';
-import type { DrawerNavigationProp } from '@react-navigation/drawer';
+import { useNavigation } from 'expo-router';
+import type { DrawerNavigationProp } from 'expo-router/drawer';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useSettings } from '../../src/stores/settingsStore';
+import { LOCK_MODE_LABELS, LockMode } from '../../src/stores/settingsStore';
 import { getHealth } from '../../src/api/aura';
 import { colors, spacing, radius, typography } from '../../src/theme';
 import GlassCard from '../../src/components/GlassCard';
 import GlassButton from '../../src/components/GlassButton';
 import GlassInput from '../../src/components/GlassInput';
 
+const LOCK_MODES: LockMode[] = ['exit', '30s', '60s', '120s', '300s'];
+
 export default function SettingsScreen() {
   const router = useRouter();
   const navigation = useNavigation<DrawerNavigationProp<{}>>();
-  const { backendUrl, apiKey, save } = useSettings();
+  const { backendUrl, apiKey, lockMode, save, setLockMode } = useSettings();
   const [url, setUrl] = useState('');
   const [key, setKey] = useState('');
   const [testing, setTesting] = useState(false);
@@ -159,6 +162,36 @@ export default function SettingsScreen() {
           </View>
           <MaterialIcons name="chevron-right" size={18} color={colors.onSurface} />
         </Pressable>
+
+        <GlassCard>
+          <View style={styles.lockSectionHeader}>
+            <MaterialIcons name="timer" size={16} color={colors.primary} />
+            <Text style={styles.lockSectionLabel}>AUTO-LOCK AFTER</Text>
+          </View>
+          <View style={styles.lockChips}>
+            {LOCK_MODES.map((mode) => {
+              const active = lockMode === mode;
+              return (
+                <Pressable
+                  key={mode}
+                  onPress={() => setLockMode(mode)}
+                  style={({ pressed }) => [
+                    styles.lockChip,
+                    active && styles.lockChipActive,
+                    pressed && { opacity: 0.8 },
+                  ]}
+                >
+                  <Text style={[styles.lockChipText, active && styles.lockChipTextActive]}>
+                    {LOCK_MODE_LABELS[mode]}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={styles.lockHint}>
+            App locks after this time away instead of instantly. "On exit" locks right away.
+          </Text>
+        </GlassCard>
       </View>
     </SafeAreaView>
   );
@@ -200,4 +233,22 @@ const styles = StyleSheet.create({
   securityLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   securityTitle: { ...typography.bodyMd, color: colors.onSurface, fontWeight: '600' },
   securitySub: { ...typography.labelSm, color: colors.onSurface, marginTop: 2 },
+  lockSectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: spacing.sm },
+  lockSectionLabel: { ...typography.labelMd, color: colors.primary },
+  lockChips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  lockChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.button,
+    borderWidth: 1,
+    borderColor: colors.glassBorder,
+    backgroundColor: colors.glassBg,
+  },
+  lockChipActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primary + '1A',
+  },
+  lockChipText: { ...typography.labelSm, color: colors.onSurface },
+  lockChipTextActive: { color: colors.primary, fontWeight: '700' },
+  lockHint: { ...typography.labelSm, color: colors.onSurfaceMuted, marginTop: spacing.sm, lineHeight: 16 },
 });

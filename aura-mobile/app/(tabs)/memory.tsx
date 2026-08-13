@@ -1,11 +1,11 @@
 import { useState, useCallback } from 'react';
 import {
   View, Text, FlatList, Pressable, StyleSheet,
-  SafeAreaView, RefreshControl, Alert, Modal, Platform,
+  SafeAreaView, RefreshControl, Alert, Modal, Platform, KeyboardAvoidingView,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
-import { useNavigation } from '@react-navigation/native';
-import type { DrawerNavigationProp } from '@react-navigation/drawer';
+import { useNavigation } from 'expo-router';
+import type { DrawerNavigationProp } from 'expo-router/drawer';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { getMemory, createMemory, updateMemory, deleteMemory } from '../../src/api/aura';
@@ -13,6 +13,7 @@ import { colors, spacing, radius, typography } from '../../src/theme';
 import GlassCard from '../../src/components/GlassCard';
 import GlassButton from '../../src/components/GlassButton';
 import GlassInput from '../../src/components/GlassInput';
+import { syncFromDesktop } from '../../src/services/memorySync';
 
 type MemoryEntry = { id: string; text: string; metadata?: any };
 
@@ -25,6 +26,22 @@ export default function MemoryScreen() {
   const [newText, setNewText] = useState('');
   const [editEntry, setEditEntry] = useState<MemoryEntry | null>(null);
   const [editText, setEditText] = useState('');
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState('');
+
+  const handleSync = async () => {
+    setSyncing(true);
+    setSyncMsg('');
+    try {
+      const { pushed } = await syncFromDesktop();
+      setSyncMsg(pushed > 0 ? `Pushed ${pushed} new entries to desktop` : 'Synced');
+      load();
+    } catch (e: any) {
+      setSyncMsg(e.message || 'Sync failed');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -111,10 +128,19 @@ export default function MemoryScreen() {
         <Pressable onPress={() => setShowCreate(true)} style={styles.addBtn}>
           <MaterialIcons name="add" size={20} color="#050505" />
         </Pressable>
+        <Pressable onPress={handleSync} disabled={syncing} style={[styles.addBtn, styles.syncBtn, syncing && { opacity: 0.6 }]}>
+          <MaterialIcons name="cloud-sync" size={18} color="#050505" />
+        </Pressable>
       </View>
 
+      {syncMsg ? <Text style={styles.syncMsg}>{syncMsg}</Text> : null}
+
       <Modal visible={showCreate} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={0}
+        >
           <GlassCard style={styles.modal}>
             <View style={styles.modalHeader}>
               <MaterialIcons name="add-circle" size={20} color={colors.primary} />
@@ -137,11 +163,15 @@ export default function MemoryScreen() {
               </GlassButton>
             </View>
           </GlassCard>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <Modal visible={!!editEntry} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={0}
+        >
           <GlassCard style={styles.modal}>
             <View style={styles.modalHeader}>
               <MaterialIcons name="edit" size={20} color={colors.primary} />
@@ -164,7 +194,7 @@ export default function MemoryScreen() {
               </GlassButton>
             </View>
           </GlassCard>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {error && !loading ? (
@@ -214,6 +244,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary, borderRadius: 10,
     width: 34, height: 34, alignItems: 'center', justifyContent: 'center',
   },
+  syncBtn: {
+    backgroundColor: 'rgba(188,140,255,0.2)', marginLeft: 8,
+    borderWidth: 1, borderColor: 'rgba(188,140,255,0.35)',
+  },
+  syncMsg: {
+    color: colors.onSurface, fontSize: 12, textAlign: 'center',
+    paddingVertical: 6, paddingHorizontal: 16,
+  },
   list: { padding: spacing.lg, gap: spacing.sm },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   cardIcon: { width: 24, height: 24, borderRadius: 6, backgroundColor: 'rgba(188,140,255,0.12)', alignItems: 'center', justifyContent: 'center' },
@@ -227,7 +265,7 @@ const styles = StyleSheet.create({
   modalHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.lg },
   modalTitle: { ...typography.headlineMd, color: colors.onSurface, fontSize: 16 },
   modalInput: { minHeight: 80, textAlignVertical: 'top' },
-  modalBtns: { flexDirection: 'row', gap: 10, marginTop: spacing.lg },
+  modalBtns: { flexDirection: 'row', justifyContent: 'center', gap: 10, marginTop: spacing.lg },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: spacing.sm, paddingTop: 80 },
   muted: { color: colors.onSurface, fontSize: 14 },
   error: { color: colors.error, fontSize: 13 },

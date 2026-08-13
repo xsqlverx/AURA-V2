@@ -1,4 +1,4 @@
-import { getStats, getNowPlaying, getProcesses, getVolume } from '../api/aura';
+import { getStats, getNowPlaying, getProcesses, getVolume, getHealth } from '../api/aura';
 import type {
   DesktopCapability,
   DesktopPresenceState,
@@ -210,8 +210,11 @@ export class DesktopPresenceSync {
   }
 
   private async syncHealth(): Promise<void> {
+    const data = await fetchWithTimeout(() => getHealth());
+    const healthy = data?.status === 'ok';
+
     const health: HealthInfo = {
-      backend: 'healthy',
+      backend: healthy ? 'healthy' : 'down',
       uptime_seconds: 0,
       last_seen: Date.now(),
     };
@@ -219,7 +222,7 @@ export class DesktopPresenceSync {
     const update: SyncUpdate = {
       health,
       lastUpdated: Date.now(),
-      syncStatus: 'synced',
+      syncStatus: healthy ? 'synced' as const : 'stale' as const,
     };
 
     if (!this.availableCaps.includes('health')) {

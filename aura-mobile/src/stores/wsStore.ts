@@ -9,7 +9,10 @@ type WsStore = {
   _reconnectTimer: ReturnType<typeof setTimeout> | null;
   connect: (url: string) => void;
   disconnect: () => void;
+  reconnect: (url: string) => void;
 };
+
+let connectToken = 0;
 
 export const useWs = create<WsStore>((set, get) => ({
   state: 'disconnected',
@@ -19,10 +22,16 @@ export const useWs = create<WsStore>((set, get) => ({
 
   connect: (url: string) => {
     const existing = get()._ws;
+    if (existing && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
     if (existing) {
+      existing.onclose = null;
+      existing.onerror = null;
       existing.close();
     }
 
+    const token = ++connectToken;
     const wsUrl = url.replace(/^http/, 'ws') + '/ws';
     let ws: WebSocket;
 
@@ -34,10 +43,12 @@ export const useWs = create<WsStore>((set, get) => ({
     }
 
     ws.onopen = () => {
+      if (token !== connectToken) return;
       set({ connected: true });
     };
 
     ws.onmessage = (e) => {
+      if (token !== connectToken) return;
       const msg = e.data as string;
       if (msg.startsWith('STATE:')) {
         const s = msg.replace('STATE:', '').trim().toLowerCase() as OrbState;
@@ -48,10 +59,10 @@ export const useWs = create<WsStore>((set, get) => ({
     };
 
     ws.onclose = () => {
+      if (token !== connectToken) return;
       set({ connected: false, state: 'disconnected', _ws: null });
       const timer = setTimeout(() => {
-        const cur = get()._ws;
-        if (!cur || cur.readyState === WebSocket.CLOSED) {
+        if (token === connectToken) {
           get().connect(url);
         }
       }, 3000);
@@ -59,19 +70,34 @@ export const useWs = create<WsStore>((set, get) => ({
     };
 
     ws.onerror = () => {
-      ws.close();
+      // onclose fires after onerror and handles state + reconnect
     };
 
     set({ _ws: ws });
   },
 
   disconnect: () => {
+    connectToken++;
     const { _ws, _reconnectTimer } = get();
     if (_reconnectTimer) clearTimeout(_reconnectTimer);
     if (_ws) {
       _ws.onclose = null;
+      _ws.onerror = null;
       _ws.close();
     }
     set({ _ws: null, connected: false, state: 'disconnected' });
+  },
+
+  reconnect: (url: string) => {
+    connectToken++;
+    const { _ws, _reconnectTimer } = get();
+    if (_reconnectTimer) clearTimeout(_reconnectTimer);
+    if (_ws) {
+      _ws.onclose = null;
+      _ws.onerror = null;
+      _ws.close();
+    }
+    set({ _ws: null, connected: false, state: 'disconnected' });
+    get().connect(url);
   },
 }));

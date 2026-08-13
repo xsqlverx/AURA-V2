@@ -78,7 +78,7 @@ export default function ConversationScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#050505',
+    backgroundColor: 'transparent',
   },
   header: {
     flexDirection: 'row',

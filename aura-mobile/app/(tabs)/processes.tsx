@@ -4,8 +4,8 @@ import {
   SafeAreaView, RefreshControl, Alert, Platform,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
-import { useNavigation } from '@react-navigation/native';
-import type { DrawerNavigationProp } from '@react-navigation/drawer';
+import { useNavigation } from 'expo-router';
+import type { DrawerNavigationProp } from 'expo-router/drawer';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { getProcesses, killProcess } from '../../src/api/aura';

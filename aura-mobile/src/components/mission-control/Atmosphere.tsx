@@ -24,7 +24,7 @@ export default function Atmosphere() {
   return (
     <>
       <LinearGradient
-        colors={['#050505', '#0A0A0A']}
+        colors={['#030508', '#070A0F']}
         style={styles.base}
       />
       <Animated.View style={[StyleSheet.absoluteFill, washStyle]} pointerEvents="none">

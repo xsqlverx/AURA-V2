@@ -427,3 +427,53 @@ def browser_control(action: str = "goto", **kwargs) -> dict:
     except Exception as e:
         logger.error("browser_control(%s) failed: %s", action, e)
         return {"error": str(e)}
+
+
+# ── Z.ai Agent mode (GLM) ──────────────────────────────────────────────────────
+
+async def _z_agent_submit(prompt: str) -> dict:
+    """Open chat.z.ai in Agent mode and submit a directive for GLM to build."""
+    await _ensure_browser()
+    try:
+        await _page.goto("https://chat.z.ai/", wait_until="domcontentloaded", timeout=30000)
+        await _page.wait_for_timeout(1500)
+
+        input_found = False
+        for loc in (
+            _page.get_by_placeholder("Message"),
+            _page.get_by_placeholder("Ask anything"),
+            _page.get_by_role("textbox"),
+            _page.locator("textarea"),
+        ):
+            try:
+                el = loc.first
+                if await el.count() == 0:
+                    continue
+                await el.click(timeout=5000)
+                await el.fill(prompt)
+                input_found = True
+                break
+            except Exception:
+                continue
+        if not input_found:
+            return {"error": "Could not find the chat.z.ai input box."}
+
+        await _page.keyboard.press("Enter")
+        await _page.wait_for_timeout(2500)
+        return {
+            "success": True,
+            "action": f"submitted directive to GLM Agent: '{prompt[:80]}...'",
+            "url": _page.url,
+        }
+    except Exception as e:
+        return {"error": f"Z.ai agent submit failed: {e}"}
+
+
+def z_agent_submit(prompt: str) -> dict:
+    if _browser_dead:
+        return {"error": "Browser unavailable after persistent launch failure. Use web_search or scrape_website instead."}
+    try:
+        return _run(_z_agent_submit(prompt))
+    except Exception as e:
+        logger.error("z_agent_submit failed: %s", e)
+        return {"error": str(e)}

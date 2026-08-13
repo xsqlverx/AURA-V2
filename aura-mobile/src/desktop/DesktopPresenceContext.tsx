@@ -54,10 +54,8 @@ export function DesktopPresenceProvider({ children }: Props) {
       setState((prev) => ({ ...prev, ...update }));
     });
     syncRef.current = sync;
-
-    if (wsConnected) {
-      sync.start();
-    }
+    sync.start();
+    sync.refresh();
 
     return () => {
       sync.stop();
@@ -66,14 +64,13 @@ export function DesktopPresenceProvider({ children }: Props) {
   }, []);
 
   useEffect(() => {
-    if (wsConnected && syncRef.current) {
-      syncRef.current.start();
+    if (syncRef.current) {
       syncRef.current.refresh();
-    } else if (!wsConnected && syncRef.current) {
+    }
+    if (!wsConnected && syncRef.current) {
       setState((prev) => ({
         ...prev,
         syncStatus: 'stale' as const,
-        health: { backend: 'down', uptime_seconds: 0, last_seen: Date.now() },
       }));
     }
   }, [wsConnected]);

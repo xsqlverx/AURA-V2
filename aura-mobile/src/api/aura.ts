@@ -1,4 +1,4 @@
-const DEFAULT_URL = 'http://100.100.100.100:8000';
+const DEFAULT_URL = 'http://192.168.29.242:8000';
 const DEFAULT_KEY = 'testkey123';
 
 let _baseUrl = DEFAULT_URL;
@@ -100,8 +100,12 @@ export async function getStats() {
 
 // ── Weather ──────────────────────────────────────────────────────────
 
+import { getDeviceCoords } from '../services/location';
+
 export async function getWeather() {
-  const res = await request('/weather');
+  const pos = await getDeviceCoords();
+  const path = pos ? `/weather?lat=${pos.lat}&lon=${pos.lon}` : '/weather';
+  const res = await request(path);
   return res.json();
 }
 
@@ -389,4 +393,58 @@ export async function uploadAudio(uri: string): Promise<string> {
 
 export function getWebSocketUrl() {
   return _baseUrl.replace(/^http/, 'ws') + '/ws';
+}
+
+// ── Activity Log ─────────────────────────────────────────────────────
+
+export async function getActivityLog(eventType: string = '', limit: number = 200) {
+  const params = new URLSearchParams();
+  if (eventType) params.set('event_type', eventType);
+  if (limit !== 200) params.set('limit', String(limit));
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  const res = await request(`/api/activity/log${qs}`);
+  return res.json();
+}
+
+export async function getActivitySummary(hours: number = 24) {
+  const res = await request(`/api/activity/summary?hours=${hours}`);
+  return res.json();
+}
+
+// ── Phone Notifications ──────────────────────────────────────────────
+
+export async function sendPhoneNotification(app: string, title: string, text: string) {
+  const res = await request('/api/phone-notification', {
+    method: 'POST',
+    body: JSON.stringify({ app, title, text }),
+  });
+  return res.json();
+}
+
+export async function getPhoneNotifications(limit: number = 50) {
+  const res = await request(`/api/phone-notifications?limit=${limit}`);
+  return res.json();
+}
+
+// ── Mobile Brain Sync ───────────────────────────────────────────────────
+
+export async function pullMobileMemorySync() {
+  const res = await request('/memory/mobile-sync');
+  const data = await res.json();
+  return {
+    revision: data.revision as string,
+    curated: data.curated as { category: string; text: string }[],
+    memories: data.memories as { id: string; text: string; metadata?: any }[],
+  };
+}
+
+export async function pushMobileMemorySync(payload: {
+  curated: { category: string; text: string }[];
+  memories: { text: string }[];
+}) {
+  const res = await request('/memory/mobile-sync', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return res.json();
 }

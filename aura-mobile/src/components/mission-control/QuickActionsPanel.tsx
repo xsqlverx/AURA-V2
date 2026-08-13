@@ -1,4 +1,4 @@
-import { useCallback, useRef, useMemo, useState } from 'react';
+import { useCallback, useRef, useMemo, useState, useEffect } from 'react';
 import {
   View, Text, Pressable, StyleSheet, PanResponder, ScrollView,
   Dimensions, Platform,
@@ -43,12 +43,16 @@ type ActionItem = {
 
 export default function QuickActionsPanel({ onClose }: Props) {
   const insets = useSafeAreaInsets();
-  const translateY = useSharedValue(0);
+  const translateY = useSharedValue(SCREEN_HEIGHT);
   const [volume, setVolState] = useState(50);
   const [muted, setMuted] = useState(false);
 
   const SNAP_POINT = SCREEN_HEIGHT * 0.6;
   const START_Y = SCREEN_HEIGHT;
+
+  useEffect(() => {
+    translateY.value = withSpring(0, { damping: 20, stiffness: 200 });
+  }, []);
 
   const handleClose = useCallback(() => {
     translateY.value = withSpring(START_Y, { damping: 20, stiffness: 200 }, () => {
@@ -250,7 +254,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     maxHeight: '90%',
-    backgroundColor: '#0A0A0A',
+    backgroundColor: '#0B1017',
     borderTopLeftRadius: radius.xl,
     borderTopRightRadius: radius.xl,
     borderTopWidth: 1,

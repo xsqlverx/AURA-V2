@@ -1,6 +1,6 @@
 import { View, Text, Pressable, SafeAreaView, StyleSheet } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import type { DrawerNavigationProp } from '@react-navigation/drawer';
+import { useNavigation } from 'expo-router';
+import type { DrawerNavigationProp } from 'expo-router/drawer';
 import { colors } from '../../src/theme';
 import { typography } from '../../src/tokens/typography';
 import { glass, text } from '../../src/tokens/colors';

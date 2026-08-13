@@ -162,6 +162,10 @@ async def lifespan(app: FastAPI):
     from tools import tracker
     tracker.start()
 
+    # Start continuous activity logger (boot, apps, browser history)
+    from tools import activity_logger
+    activity_logger.start()
+
     # Wire agent job + pending-action stores to the WS broadcaster
     from core import jobs, pending
     jobs.set_broadcaster(ws_manager.broadcast_sync)
@@ -242,6 +246,11 @@ class CuratedMemoryCreate(BaseModel):
 
 class CuratedMemoryUpdate(BaseModel):
     text: str
+
+class MobileSyncPush(BaseModel):
+    """Memories + phoneside facts pushed back to the PC by the mobile brain."""
+    curated: list[dict] = []   # [{category: "user"|"self", text: str}]
+    memories: list[dict] = []  # [{text: str}] — goes into ChromaDB
 
 class MediaAction(BaseModel):
     action: str  # "play_pause" | "next" | "prev" | "volume"
@@ -400,10 +409,11 @@ async def toggle_flow_mode():
 
 
 @app.get("/weather")
-async def weather():
-    """Return current weather data (cached from wttr.in)."""
+async def weather(lat: Optional[float] = None, lon: Optional[float] = None):
+    """Return current weather data (cached from wttr.in/open-meteo).
+    Accepts optional lat/lon from the mobile client for location-accurate weather."""
     from memory.context import get_weather_data
-    return await get_weather_data()
+    return await get_weather_data(lat=lat, lon=lon)
 
 
 # ── Tasks CRUD ────────────────────────────────────────────────────────────────
@@ -727,6 +737,77 @@ async def delete_curated_memory(category: str, idx: int):
     store = get_store()
     result = store.remove_by_index(category, idx)
     return {"result": result}
+
+
+# ── Mobile Brain Sync ────────────────────────────────────────────────────
+# Offline-first mirror. PC is source of truth: phone pulls curated memory +
+# recent ChromaDB recalls, pushes phoneside memories back on reconnect.
+
+def _mobile_sync_revision(store, entries: list[dict]) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    for e in store.user_entries:
+        h.update(("u|" + e).encode("utf-8"))
+    for e in store.memory_entries:
+        h.update(("m|" + e).encode("utf-8"))
+    for e in entries:
+        h.update(("c|" + e.get("id", "")).encode("utf-8"))
+    return h.hexdigest()[:24]
+
+
+@app.get("/memory/mobile-sync")
+async def mobile_sync_pull():
+    """Return curated memory + recent recalls + a revision hash for the phone."""
+    store = get_store()
+    curated = []
+    for i, t in enumerate(store.memory_entries):
+        curated.append({"category": "self", "text": t})
+    for i, t in enumerate(store.user_entries):
+        curated.append({"category": "user", "text": t})
+    entries = chroma_store.get_all_entries()
+    entries.sort(key=lambda e: (e.get("metadata") or {}).get("timestamp", 0), reverse=True)
+    recent = entries[:50]
+    return {
+        "revision": _mobile_sync_revision(store, recent),
+        "curated": curated,
+        "memories": [
+            {"id": e.get("id"), "text": e.get("text"),
+             "metadata": e.get("metadata") or {}}
+            for e in recent
+        ],
+    }
+
+
+@app.post("/memory/mobile-sync")
+async def mobile_sync_push(req: MobileSyncPush):
+    """Accept phoneside memories. Curated facts dedupe by exact text; Chroma
+    entries dedupe by embedding similarity via chroma_store.save()."""
+    store = get_store()
+    added_curated = 0
+    added_chroma = 0
+
+    seen = {t for t in store.user_entries} | {t for t in store.memory_entries}
+    for item in req.curated:
+        text = (item.get("text") or "").strip()
+        category = item.get("category", "user")
+        if not text or text in seen:
+            continue
+        store.add_entry(category, text)
+        seen.add(text)
+        added_curated += 1
+
+    for item in req.memories:
+        text = (item.get("text") or "").strip()
+        if not text:
+            continue
+        if chroma_store.save(text, metadata={"origin": "mobile"}):
+            added_chroma += 1
+
+    return {
+        "success": True,
+        "added_curated": added_curated,
+        "added_chroma": added_chroma,
+    }
 
 
 # ── Media ─────────────────────────────────────────────────────────────────────
@@ -1091,6 +1172,56 @@ async def activity_session(session_id: str):
     with open(path) as f:
         data = json.load(f)
     return data
+
+
+# ── Continuous Activity Log ──────────────────────────────────────────────────
+
+@app.get("/api/activity/log")
+async def activity_log(event_type: str = "", limit: int = 200):
+    from tools.activity_logger import get_activity_log
+    loop = asyncio.get_running_loop()
+    events = await loop.run_in_executor(None, get_activity_log, event_type, limit)
+    return {"events": events}
+
+
+@app.get("/api/activity/summary")
+async def activity_summary(hours: int = 24):
+    from tools.activity_logger import get_activity_summary
+    loop = asyncio.get_running_loop()
+    summary = await loop.run_in_executor(None, get_activity_summary, hours)
+    return summary
+
+
+# ── Phone Notification Relay ──────────────────────────────────────────────────
+
+class PhoneNotificationRequest(BaseModel):
+    app: str = ""
+    title: str = ""
+    text: str = ""
+    ts: str = ""
+
+_phone_notif_lock = threading.Lock()
+_phone_notif_ring: list[dict] = []
+_PHONE_NOTIF_MAX = 50
+
+@app.post("/api/phone-notification")
+async def phone_notification(req: PhoneNotificationRequest):
+    with _phone_notif_lock:
+        entry = {"app": req.app, "title": req.title, "text": req.text, "ts": req.ts or datetime.now().isoformat(timespec="seconds")}
+        _phone_notif_ring.append(entry)
+        if len(_phone_notif_ring) > _PHONE_NOTIF_MAX:
+            _phone_notif_ring.pop(0)
+    try:
+        await ws_manager.broadcast(f"PHONE_NOTIF:{json.dumps(entry, ensure_ascii=False)}")
+    except Exception:
+        pass
+    return {"success": True}
+
+
+@app.get("/api/phone-notifications")
+async def phone_notifications(limit: int = 50):
+    with _phone_notif_lock:
+        return {"notifications": list(_phone_notif_ring)[-limit:]}
 
 
 # ── Dynamic Island (PySide6 overlay) ────────────────────────────────────────────

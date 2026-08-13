@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
-import Animated, { useSharedValue, useAnimatedStyle, withTiming, withSequence, runOnJS, SlideInDown, SlideOutUp } from 'react-native-reanimated';
+import { View, Text, Pressable, StyleSheet, Platform } from 'react-native';
+import Animated, { FadeInDown, FadeOutUp } from 'react-native-reanimated';
+import { BlurView } from 'expo-blur';
 import Icon from './Icon';
 import { glass, text, semantic, accent } from '../tokens/colors';
 import { typography } from '../tokens/typography';
@@ -12,6 +13,7 @@ type ToastType = 'success' | 'error' | 'info' | 'warning';
 
 type Props = {
   message: string;
+  detail?: string;
   type?: ToastType;
   visible: boolean;
   onDismiss: () => void;
@@ -25,55 +27,71 @@ const TOAST_CONFIG: Record<ToastType, { icon: string; accent: string }> = {
   warning: { icon: 'info-outline', accent: semantic.warning },
 };
 
-export default function Toast({ message, type = 'info', visible, onDismiss, autoDismiss = 3000 }: Props) {
-  const config = TOAST_CONFIG[type];
-  const progress = useSharedValue(1);
-
+export default function Toast({ message, detail, type = 'info', visible, onDismiss, autoDismiss = 3000 }: Props) {
   useEffect(() => {
-    if (visible) {
-      progress.value = 1;
-      progress.value = withTiming(0, { duration: autoDismiss }, (finished) => {
-        if (finished) runOnJS(onDismiss)();
-      });
-    }
-  }, [visible]);
-
-  const progressStyle = useAnimatedStyle(() => ({
-    width: `${progress.value * 100}%`,
-  }));
+    if (!visible) return;
+    const t = setTimeout(onDismiss, autoDismiss);
+    return () => clearTimeout(t);
+  }, [visible, autoDismiss, onDismiss]);
 
   if (!visible) return null;
+  const config = TOAST_CONFIG[type];
 
   return (
     <Animated.View
-      entering={SlideInDown.duration(duration.toastIn).springify()}
-      exiting={SlideOutUp.duration(duration.toastOut)}
-      style={styles.container}
+      entering={FadeInDown.duration(220).springify().damping(30).stiffness(420).withInitialValues({ translateY: 20 })}
+      exiting={FadeOutUp.duration(duration.toastOut)}
+      style={styles.positioner}
     >
-      <Pressable onPress={onDismiss} style={styles.inner}>
-        <Icon name={config.icon} size={16} color={config.accent} />
-        <Text style={styles.message}>{message}</Text>
+      <Pressable onPress={onDismiss} style={styles.container}>
+        {Platform.OS === 'ios' ? (
+          <BlurView intensity={18} tint="dark" style={styles.blur}>
+            <ToastBody config={config} message={message} detail={detail} />
+          </BlurView>
+        ) : (
+          <View style={styles.androidBg}>
+            <ToastBody config={config} message={message} detail={detail} />
+          </View>
+        )}
       </Pressable>
-      <View style={[styles.progressTrack, { backgroundColor: config.accent + '20' }]}>
-        <Animated.View style={[styles.progressFill, { backgroundColor: config.accent }, progressStyle]} />
-      </View>
     </Animated.View>
   );
 }
 
+function ToastBody({ config, message, detail }: { config: { icon: string; accent: string }; message: string; detail?: string }) {
+  return (
+    <View style={styles.inner}>
+      <Icon name={config.icon} size={16} color={config.accent} />
+      <View style={styles.textWrap}>
+        <Text style={styles.message}>{message}</Text>
+        {detail ? <Text style={styles.detail}>{detail}</Text> : null}
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  container: {
+  positioner: {
     position: 'absolute',
     top: 60,
     left: spacing.space16,
     right: spacing.space16,
-    backgroundColor: glass.bg,
+    zIndex: 200,
+  },
+  container: {
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: glass.border,
     overflow: 'hidden',
-    zIndex: 200,
-    backdropFilter: 'blur(40px)',
+    minHeight: 56,
+    maxHeight: 72,
+  },
+  blur: {
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+  },
+  androidBg: {
+    backgroundColor: 'rgba(11,16,23,0.92)',
   },
   inner: {
     flexDirection: 'row',
@@ -81,15 +99,16 @@ const styles = StyleSheet.create({
     gap: spacing.space8,
     padding: spacing.space16,
   },
+  textWrap: {
+    flex: 1,
+    gap: 2,
+  },
   message: {
     ...typography.bodySmall,
     color: text.primary,
-    flex: 1,
   },
-  progressTrack: {
-    height: 2,
-  },
-  progressFill: {
-    height: '100%',
+  detail: {
+    ...typography.caption,
+    color: text.tertiary,
   },
 });

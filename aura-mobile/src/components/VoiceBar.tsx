@@ -107,7 +107,7 @@ const styles = StyleSheet.create({
     gap: spacing.space8,
     borderTopWidth: 1,
     borderTopColor: glass.border,
-    backgroundColor: '#050505',
+    backgroundColor: '#0B1017',
     alignItems: 'flex-end',
   },
   inputWrap: {

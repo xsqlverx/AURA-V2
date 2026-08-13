@@ -46,6 +46,33 @@ def _scrub(text: str) -> str:
     return text
 
 
+def _strip_tail_tags(text: str) -> str:
+    tag = re.search(r"</?(?:function|memory)\b", text, flags=re.IGNORECASE)
+    if tag:
+        return text[: tag.start()]
+    return text
+
+
+async def _scrub_stream(chunks):
+    """Scrub streaming chunks while holding back partial tags split across chunks."""
+    pending = ""
+    async for delta in chunks:
+        buf = pending + delta
+        cleaned = _scrub(buf)
+        tag = re.search(r"</?(?:function|memory)\b", cleaned, flags=re.IGNORECASE)
+        if tag:
+            cut = tag.start()
+            pending = cleaned[cut:]
+            cleaned = cleaned[:cut]
+        else:
+            pending = ""
+        if cleaned:
+            yield cleaned
+    tail = _strip_tail_tags(_scrub(pending))
+    if tail:
+        yield tail
+
+
 def _log_usage(model: str, stage: str, usage):
     """Log model + token usage for a completed (non-streaming) completion."""
     if usage is None:
@@ -172,7 +199,19 @@ You have a `scrape_website` tool that opens a URL in a headless browser and
 returns the visible text content. Use this when you need to read information
 from a live website — docs, articles, product pages, etc. Just output:
 <function=scrape_website {"url":"https://example.com/page"}<function=scrape_website>
-Then use the returned content to answer the user's question."""
+Then use the returned content to answer the user's question.
+
+## Android (Phone) Actions
+Some actions can only run on the user's PHONE, not this PC. When the user
+asks for anything phone-only, delegate it with `android_handoff` instead of
+pretending to do it:
+- Send an SMS/text message → action="send_sms", phone_number, message
+- Open an app on their phone → action="open_app", app_package
+- Open the phone share sheet → action="share_sheet", text
+
+The phone app executes the action and you reply with a short confirmation
+to the user. Do NOT attempt these on the PC. Everything else (Windows control,
+files, vault, web, system) stays here on the PC."""
 
 AURA_PERSONA_CONVO = """You are Aura, a local AI assistant and personal companion. \
 You are sharp, warm, and direct — never robotic. \
@@ -358,6 +397,16 @@ async def _run_tool(name: str, args: dict, job_id: str | None = None) -> str:
                     }
                 else:
                     result = send_whatsapp(contact, message)
+            case "android_handoff":
+                result = {
+                    "handoff": True,
+                    "platform": "android",
+                    "action": args.get("action", ""),
+                    "phone_number": args.get("phone_number", ""),
+                    "message": args.get("message", ""),
+                    "app_package": args.get("app_package", ""),
+                    "text": args.get("text", ""),
+                }
             case "memory":
                 global _turns_since_memory
                 with _turns_lock:
@@ -413,7 +462,7 @@ async def run(
     job_id = jobs.start_job(message)
     chunks: list[str] = []
     try:
-        async for chunk in _run(message, history, mode):
+        async for chunk in _run(message, history, mode, job_id):
             chunks.append(chunk)
             yield chunk
         jobs.finish_job(job_id, "done", "".join(chunks)[:500])
@@ -427,6 +476,7 @@ async def _run(
     message: str,
     history: list[dict],
     mode: str = "deep",
+    job_id: str | None = None,
 ) -> AsyncIterator[str]:
     global _turns_since_memory
     with _turns_lock:
@@ -492,13 +542,17 @@ async def _run(
             max_tokens=1024,
             timeout=30.0,
         )
+
+        async def deltas():
+            async for chunk in stream:
+                d = chunk.choices[0].delta.content or ""
+                if d:
+                    yield d
+
         full_response = []
-        async for chunk in stream:
-            delta = chunk.choices[0].delta.content or ""
-            if delta:
-                delta = _scrub(delta)
-                full_response.append(delta)
-                yield delta
+        async for piece in _scrub_stream(deltas()):
+            full_response.append(piece)
+            yield piece
         chroma_store.save(f"User: {message}")
         chroma_store.save(f"Aura: {''.join(full_response)}")
         return
@@ -564,6 +618,16 @@ async def _run(
                     logger.info("Native function call: %s(%s)", name, args)
                     result = await _run_tool(name, args, job_id)
                     logger.info("Native function result: %s", result)
+                    if name == "android_handoff":
+                        # Emit a handoff marker into the stream. The mobile app
+                        # intercepts this, executes the Android action locally,
+                        # and strips it from the visible text.
+                        try:
+                            payload = json.loads(result)
+                            marker = json.dumps(payload.get("action") and payload, default=str)
+                            yield f"<handoff_android>{marker}</handoff_android>"
+                        except Exception:
+                            pass
                     messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
                 tool_rounds += 1
                 continue
@@ -582,13 +646,17 @@ async def _run(
                         max_tokens=1024,
                         timeout=30.0,
                     )
+
+                    async def deltas():
+                        async for chunk in stream:
+                            d = chunk.choices[0].delta.content or ""
+                            if d:
+                                yield d
+
                     full_response = []
-                    async for chunk in stream:
-                        delta = chunk.choices[0].delta.content or ""
-                        if delta:
-                            delta = _scrub(delta)
-                            full_response.append(delta)
-                            yield delta
+                    async for piece in _scrub_stream(deltas()):
+                        full_response.append(piece)
+                        yield piece
                     chroma_store.save(f"User: {message}")
                     chroma_store.save(f"Aura: {''.join(full_response)}")
                     return
@@ -615,13 +683,16 @@ async def _run(
         timeout=30.0,
     )
 
+    async def deltas():
+        async for chunk in stream:
+            d = chunk.choices[0].delta.content or ""
+            if d:
+                yield d
+
     full_response = []
-    async for chunk in stream:
-        delta = chunk.choices[0].delta.content or ""
-        if delta:
-            delta = _scrub(delta)
-            full_response.append(delta)
-            yield delta
+    async for piece in _scrub_stream(deltas()):
+        full_response.append(piece)
+        yield piece
 
     chroma_store.save(f"User: {message}")
     chroma_store.save(f"Aura: {''.join(full_response)}")

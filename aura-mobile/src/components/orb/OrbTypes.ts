@@ -16,13 +16,7 @@ export type OrbState =
 
 export type OrbSizeName = 'small' | 'medium' | 'large' | 'xlarge';
 
-export type ParticleType =
-  | 'orbit'
-  | 'converge'
-  | 'scatter'
-  | 'fragments'
-  | 'hexagonal'
-  | 'none';
+export type ParticleType = 'orbit' | 'drift' | 'converge' | 'none';
 
 export type StateConfig = {
   coreColor1: string;
@@ -32,20 +26,22 @@ export type StateConfig = {
   glowColor: string;
   glowIntensity: number;
   haloVisible: boolean;
-  haloRotationSpeed: number;
+  haloRotationMs: number;
   ringsVisible: number;
   ringsOpacity: number;
   ringsColor: string;
+  ringScale: number;
+  ringPulseOpacity: { from: number; to: number };
+  ringsRotateMs: number;
   particlesActive: boolean;
   particleType: ParticleType;
   particleCount: number;
   particleColor: string;
-  ripplesActive: boolean;
-  rippleCount: number;
-  rippleSpeed: number;
+  particleSpeed: number;
   floatAmplitude: number;
-  floatSpeed: number;
+  floatDuration: number;
   breathingAmplitude: number;
+  speechDriven: boolean;
 };
 
 export const ORB_SIZES: Record<OrbSizeName, number> = {

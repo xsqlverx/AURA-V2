@@ -48,7 +48,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   scroll: {
-    backgroundColor: '#0A0A0A',
+    backgroundColor: '#0B1017',
     padding: spacing.space12,
   },
   code: {

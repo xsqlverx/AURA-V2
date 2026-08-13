@@ -1,5 +1,5 @@
 import { useMemo, useCallback, useRef } from 'react';
-import { Pressable, View, StyleSheet, AccessibilityInfo } from 'react-native';
+import { Pressable, View, StyleSheet } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -12,9 +12,9 @@ import OrbGlow from './OrbGlow';
 import OrbCore from './OrbCore';
 import OrbHalo from './OrbHalo';
 import OrbParticles from './OrbParticles';
-import OrbRipples from './OrbRipples';
-import { usePulseAnimation, useFloatAnimation, useRingStyles, useAnimatedOpacity } from './OrbAnimations';
+import { usePulseAnimation, useFloatAnimation, useRingStyles, useAnimatedOpacity, useSpeechEnvelope, useRingRotation } from './OrbAnimations';
 import { getStateConfig } from './OrbStateMachine';
+import { reducedMotion as reducedMotionToken } from '../../tokens/animation';
 import { haptic } from '../../motion/haptics';
 import type { OrbState, OrbSizeName } from './OrbTypes';
 import { ORB_SIZES } from './OrbTypes';
@@ -27,6 +27,7 @@ type Props = {
   intensity?: number;
   interactive?: boolean;
   reducedMotion?: boolean;
+  lookOffsetX?: number;
   onTap?: () => void;
   onLongPress?: () => void;
   accessibilityLabel?: string;
@@ -45,11 +46,13 @@ export default function Orb({
   intensity = 1,
   interactive = false,
   reducedMotion: forceReducedMotion,
+  lookOffsetX = 0,
   onTap,
   onLongPress,
   accessibilityLabel,
 }: Props) {
-  // Resolve effective state from props
+  const reduced = forceReducedMotion ?? reducedMotionToken.enable;
+
   const effectiveState: OrbState = useMemo(() => {
     if (state) return state;
     if (orState) return orState;
@@ -66,24 +69,18 @@ export default function Orb({
     floatAmplitude: config.floatAmplitude * intensity,
   }), [config, intensity]);
 
-  // Core animations
-  const { pulse } = usePulseAnimation(scaledConfig, effectiveState);
-  const { floatStyle } = useFloatAnimation(scaledConfig.floatAmplitude, scaledConfig.floatSpeed);
+  const { pulse } = usePulseAnimation(scaledConfig, effectiveState, reduced);
+  const speech = useSpeechEnvelope(effectiveState === 'speaking' && !reduced);
+  const { floatStyle } = useFloatAnimation(scaledConfig.floatAmplitude, scaledConfig.floatDuration, reduced);
 
-  // Ring styles
   const ringStyles = [
-    useRingStyles(pulse, scaledConfig, 0),
-    useRingStyles(pulse, scaledConfig, 1),
-    useRingStyles(pulse, scaledConfig, 2),
+    useRingStyles(pulse, speech, scaledConfig, 0),
+    useRingStyles(pulse, speech, scaledConfig, 1),
   ];
+  const ringSizes = [1.18, 1.55];
+  const { opacityStyle: ringsOpacityStyle } = useAnimatedOpacity(scaledConfig.ringsVisible > 0, 300);
+  const { ringRotationStyle } = useRingRotation(scaledConfig.ringsRotateMs, reduced);
 
-  const ringSizes = [1.3, 1.7, 2.2];
-  const { opacityStyle: ringsOpacityStyle } = useAnimatedOpacity(
-    scaledConfig.ringsVisible > 0,
-    300
-  );
-
-  // Interaction
   const tapScale = useSharedValue(1);
 
   const handlePressIn = useCallback(() => {
@@ -110,7 +107,7 @@ export default function Orb({
   }, [onLongPress]);
 
   const containerStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: tapScale.value }],
+    transform: [{ scale: tapScale.value }, { translateX: lookOffsetX }],
   }));
 
   return (
@@ -133,24 +130,14 @@ export default function Orb({
           containerStyle,
         ]}
       >
-        {/* Layer 4: Glow (behind everything) */}
-        <OrbGlow size={pixelSize} glowColor={scaledConfig.glowColor} intensity={scaledConfig.glowIntensity} pulse={pulse} />
+        {/* State halo (ambient, outermost) */}
+        <OrbHalo size={pixelSize} config={scaledConfig} pulse={pulse} speech={speech} reduced={reduced} />
 
-        {/* Layer 3: Outer rings */}
-        <Animated.View style={[StyleSheet.absoluteFill, styles.ringsWrapper, ringsOpacityStyle]} pointerEvents="none">
-          {scaledConfig.ringsVisible >= 3 && (
-            <Animated.View
-              style={[
-                styles.ring,
-                {
-                  width: pixelSize * ringSizes[2],
-                  height: pixelSize * ringSizes[2],
-                  borderRadius: pixelSize * ringSizes[2] / 2,
-                },
-                ringStyles[2],
-              ]}
-            />
-          )}
+        {/* Glow (light field) */}
+        <OrbGlow size={pixelSize} glowColor={scaledConfig.glowColor} intensity={scaledConfig.glowIntensity} pulse={pulse} speech={speech} speechDriven={scaledConfig.speechDriven} />
+
+        {/* Rings (primary, secondary) */}
+        <Animated.View style={[StyleSheet.absoluteFill, styles.ringsWrapper, ringsOpacityStyle, ringRotationStyle]} pointerEvents="none">
           {scaledConfig.ringsVisible >= 2 && (
             <Animated.View
               style={[
@@ -158,7 +145,7 @@ export default function Orb({
                 {
                   width: pixelSize * ringSizes[1],
                   height: pixelSize * ringSizes[1],
-                  borderRadius: pixelSize * ringSizes[1] / 2,
+                  borderRadius: (pixelSize * ringSizes[1]) / 2,
                 },
                 ringStyles[1],
               ]}
@@ -171,7 +158,7 @@ export default function Orb({
                 {
                   width: pixelSize * ringSizes[0],
                   height: pixelSize * ringSizes[0],
-                  borderRadius: pixelSize * ringSizes[0] / 2,
+                  borderRadius: (pixelSize * ringSizes[0]) / 2,
                 },
                 ringStyles[0],
               ]}
@@ -179,17 +166,11 @@ export default function Orb({
           )}
         </Animated.View>
 
-        {/* Layer 2: Halo */}
-        <OrbHalo size={pixelSize} config={scaledConfig} pulse={pulse} />
+        {/* Particles (sparse) */}
+        <OrbParticles size={pixelSize} config={scaledConfig} reduced={reduced} />
 
-        {/* Layer 1: Ripples */}
-        <OrbRipples size={pixelSize} config={scaledConfig} />
-
-        {/* Layer 0: Core */}
-        <OrbCore size={pixelSize} config={scaledConfig} pulse={pulse} state={effectiveState} />
-
-        {/* Particles (topmost) */}
-        <OrbParticles size={pixelSize} config={scaledConfig} />
+        {/* Core (center) */}
+        <OrbCore size={pixelSize} config={scaledConfig} pulse={pulse} speech={speech} state={effectiveState} reduced={reduced} />
       </Animated.View>
     </Pressable>
   );

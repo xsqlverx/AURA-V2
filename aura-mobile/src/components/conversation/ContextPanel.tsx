@@ -161,7 +161,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     width: 260,
-    backgroundColor: '#0A0A0A',
+    backgroundColor: '#0B1017',
     borderLeftWidth: 1,
     borderLeftColor: glass.border,
     zIndex: 100,

@@ -1,6 +1,6 @@
 import { View, Text, Pressable, StyleSheet } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import type { DrawerNavigationProp } from '@react-navigation/drawer';
+import { useNavigation } from 'expo-router';
+import type { DrawerNavigationProp } from 'expo-router/drawer';
 import Icon from '../Icon';
 import { text, glass, accent, backgrounds } from '../../tokens/colors';
 import { typography } from '../../tokens/typography';

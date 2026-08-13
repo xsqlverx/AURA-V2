@@ -20,7 +20,7 @@ import { radius } from '../../tokens/radius';
 import { duration } from '../../tokens/animation';
 import { haptic } from '../../motion/haptics';
 import { useWs } from '../../stores/wsStore';
-import { triggerBriefing } from '../../api/aura';
+import { triggerBriefing, getBaseUrl } from '../../api/aura';
 import { useAmbient, AmbientOrbReactor } from '../../ambient';
 import { useDesktopPresence } from '../../desktop';
 import type { OrbState } from '../orb/OrbTypes';
@@ -40,6 +40,7 @@ export default function MissionControlScreen() {
   const router = useRouter();
   const wsState = useWs((s) => s.state);
   const wsConnected = useWs((s) => s.connected);
+  const wsReconnect = useWs((s) => s.reconnect);
   const insets = useSafeAreaInsets();
 
   const [hasError, setHasError] = useState(false);
@@ -48,7 +49,11 @@ export default function MissionControlScreen() {
   const { state: presence, refresh } = useDesktopPresence();
   const quickActionsY = useRef(0);
 
-  const orbState: OrbState = wsConnected ? wsState : 'disconnected';
+  const backendOnline = presence.health?.backend === 'healthy';
+  const isConnected = wsConnected || backendOnline;
+  const orbState: OrbState = isConnected
+    ? (wsConnected ? wsState : 'idle')
+    : 'disconnected';
 
   const cards: CardData[] = useMemo(() => {
     const result: CardData[] = [];
@@ -111,8 +116,9 @@ export default function MissionControlScreen() {
 
   const handleRefresh = useCallback(() => {
     haptic.press();
+    wsReconnect(getBaseUrl());
     refresh();
-  }, [refresh]);
+  }, [wsReconnect, refresh]);
 
   const handleQuickActions = useCallback(() => {
     haptic.press();
@@ -135,7 +141,7 @@ export default function MissionControlScreen() {
   }), [showQuickActions]);
 
   const hasContent = cards.length > 0 || hasError;
-  const errorMessage = !wsConnected
+  const errorMessage = !isConnected
     ? 'Server offline — check connection'
     : presence.syncStatus === 'error'
     ? 'Sync error'
@@ -159,7 +165,7 @@ export default function MissionControlScreen() {
             </AmbientOrbReactor>
 
             <View style={styles.presenceArea}>
-              <PresenceBar orbState={orbState} connected={wsConnected} />
+              <PresenceBar orbState={orbState} connected={isConnected} />
             </View>
           </Animated.View>
 
@@ -212,7 +218,7 @@ export default function MissionControlScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#050505',
+    backgroundColor: 'transparent',
   },
   safe: {
     flex: 1,

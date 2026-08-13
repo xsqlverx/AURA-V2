@@ -3,6 +3,7 @@ import { Keyboard, Alert, Platform } from 'react-native';
 import { chat as sendChatApi } from '../../api/aura';
 import { useSettings } from '../../stores/settingsStore';
 import { useWs } from '../../stores/wsStore';
+import { extractHandoffs, executeHandoff, type HandoffAction } from '../../services/handoff';
 import type {
   Message, ConversationPhase, ToolInfo, MemoryInfo, ProgressStage,
   UserMessage, TextMessage, ToolMessage, MemoryMessage, ErrorMessage, ProgressMessage,
@@ -27,6 +28,11 @@ export function useConversation() {
   const wsState = useWs((s) => s.state);
   const wsConnected = useWs((s) => s.connected);
   const messagesRef = useRef<Message[]>([]);
+  const startingRef = useRef(false);
+  const startedRef = useRef(false);
+  const stopRequestedRef = useRef(false);
+  const streamBufferRef = useRef('');
+  const pendingHandoffsRef = useRef<HandoffAction[]>([]);
 
   // Keep ref in sync
   useEffect(() => { messagesRef.current = messages; }, [messages]);
@@ -66,6 +72,9 @@ export function useConversation() {
 
   useSpeechRecognitionEvent('end', () => {
     setIsRecording(false);
+    startingRef.current = false;
+    startedRef.current = false;
+    stopRequestedRef.current = false;
   });
 
   const addMessage = useCallback((msg: Message) => {
@@ -131,14 +140,22 @@ export function useConversation() {
         }));
 
       setPhase('streaming');
+      streamBufferRef.current = '';
+      pendingHandoffsRef.current = [];
       await sendChatApi(trimmed, history, 'deep', (chunk) => {
+        streamBufferRef.current += chunk;
+        const { clean, actions } = extractHandoffs(streamBufferRef.current);
+        if (actions.length) pendingHandoffsRef.current.push(...actions);
         updateMessage(responseId, (msg) => {
           if (msg.type === 'text') {
-            return { ...msg, content: msg.content + chunk };
+            return { ...msg, content: clean };
           }
           return msg;
         });
       });
+      for (const action of pendingHandoffsRef.current) {
+        await executeHandoff(action);
+      }
     } catch (e: any) {
       const errMsg: ErrorMessage = {
         id: `err-${Date.now()}`,
@@ -165,22 +182,51 @@ export function useConversation() {
       );
       return;
     }
+    if (startingRef.current || startedRef.current) return;
+    startingRef.current = true;
+    stopRequestedRef.current = false;
     try {
       const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
       if (!perm.granted) {
         Alert.alert('Permission Denied', 'Microphone permission is required');
+        startingRef.current = false;
         return;
       }
+      if (stopRequestedRef.current) {
+        startingRef.current = false;
+        return;
+      }
+      await ExpoSpeechRecognitionModule.start({ lang: 'en-US' });
+      if (stopRequestedRef.current) {
+        // User released before start() resolved — stop immediately
+        startedRef.current = false;
+        startingRef.current = false;
+        setIsRecording(false);
+        try { ExpoSpeechRecognitionModule.stop(); } catch {}
+        return;
+      }
+      startedRef.current = true;
       setIsRecording(true);
-      ExpoSpeechRecognitionModule.start({ lang: 'en-US' });
     } catch (e: any) {
-      setIsRecording(false);
-      Alert.alert('Error', `Could not start voice: ${e.message}`);
+      startingRef.current = false;
+      startedRef.current = false;
+      stopRequestedRef.current = false;
+      Alert.alert('Error', `Could not start voice: ${e?.message ?? 'unknown error'}`);
+    } finally {
+      startingRef.current = false;
     }
   }, []);
 
   const stopRecording = useCallback(() => {
     if (!ExpoSpeechRecognitionModule) return;
+    if (startingRef.current) {
+      // Start still pending — mark it so start() aborts when it resolves
+      stopRequestedRef.current = true;
+      setIsRecording(false);
+      return;
+    }
+    if (!startedRef.current) return;
+    startedRef.current = false;
     setIsRecording(false);
     try { ExpoSpeechRecognitionModule.stop(); } catch {}
   }, []);

@@ -10,21 +10,37 @@ import { text as tx } from '../../src/tokens/colors';
 
 type NavItem = { label: string; icon: string; route: string };
 
-const NAV_ITEMS: NavItem[] = [
+const SECTION_AURA: NavItem[] = [
   { label: 'Home', icon: 'home', route: 'index' },
   { label: 'Chat', icon: 'chat', route: 'chat' },
 ];
 
-const GLANCE_ITEMS: NavItem[] = [
-  { label: 'Desktop Status', icon: GLANCE_META.desktop.icon, route: 'desktop' },
+const SECTION_CONTROL: NavItem[] = [
+  { label: 'Actions', icon: 'bolt', route: 'actions' },
+  { label: 'Presets', icon: 'bookmark', route: 'presets' },
+];
+
+const SECTION_KNOWLEDGE: NavItem[] = [
   { label: 'Memory', icon: GLANCE_META.memory.icon, route: 'memory' },
-  { label: 'Files', icon: GLANCE_META.files.icon, route: 'files' },
-  { label: 'Processes', icon: GLANCE_META.processes.icon, route: 'processes' },
   { label: 'Notes', icon: GLANCE_META.notes.icon, route: 'notes' },
-  { label: 'Media', icon: GLANCE_META.media.icon, route: 'media' },
+  { label: 'Files', icon: GLANCE_META.files.icon, route: 'files' },
+];
+
+const SECTION_SYSTEM: NavItem[] = [
+  { label: 'Desktop Status', icon: GLANCE_META.desktop.icon, route: 'desktop' },
+  { label: 'Processes', icon: GLANCE_META.processes.icon, route: 'processes' },
   { label: 'Activity', icon: GLANCE_META.activity.icon, route: 'activity' },
   { label: 'Health', icon: GLANCE_META.health.icon, route: 'health' },
-  { label: 'Presets', icon: GLANCE_META.memory.icon, route: 'presets' },
+  { label: 'Media', icon: GLANCE_META.media.icon, route: 'media' },
+  { label: 'Stats', icon: 'bar-chart', route: 'stats' },
+  { label: 'Settings', icon: 'settings', route: 'settings' },
+];
+
+const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
+  { label: 'AURA', items: SECTION_AURA },
+  { label: 'CONTROL', items: SECTION_CONTROL },
+  { label: 'KNOWLEDGE', items: SECTION_KNOWLEDGE },
+  { label: 'SYSTEM', items: SECTION_SYSTEM },
 ];
 
 function CustomDrawerContent(props: any) {
@@ -50,39 +66,26 @@ function CustomDrawerContent(props: any) {
       </View>
 
       <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} showsVerticalScrollIndicator={false}>
-        <Text style={styles.sectionLabel}>SCREENS</Text>
-        {NAV_ITEMS.map((item) => {
-          const focused = props.state?.index === props.state?.routes?.findIndex((r: any) => r.name === item.route);
-          return (
-            <Pressable
-              key={item.route}
-              style={({ pressed }) => [styles.navItem, focused && styles.navItemActive, pressed && { opacity: 0.85 }]}
-              onPress={() => navigate(item.route)}
-            >
-              <Icon name={item.icon} size={18} color={focused ? colors.primary : tx.secondary} />
-              <Text style={[styles.navLabel, focused && { color: colors.primary }]}>{item.label}</Text>
-            </Pressable>
-          );
-        })}
-
-        <View style={styles.divider} />
-
-        <Text style={styles.sectionLabel}>PAGES</Text>
-        <View style={styles.glanceSection}>
-          {GLANCE_ITEMS.map((item) => {
-            const focused = props.state?.index === props.state?.routes?.findIndex((r: any) => r.name === item.route);
-            return (
-              <Pressable
-                key={item.route}
-                style={({ pressed }) => [styles.glanceItem, focused && styles.navItemActive, pressed && { opacity: 0.85 }]}
-                onPress={() => navigate(item.route)}
-              >
-                <Icon name={item.icon} size={18} color={focused ? colors.primary : tx.secondary} />
-                <Text style={[styles.glanceLabel, focused && { color: colors.primary }]}>{item.label}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        {NAV_SECTIONS.map((section) => (
+          <View key={section.label}>
+            <Text style={styles.sectionLabel}>{section.label}</Text>
+            {section.items.map((item) => {
+              const focused = props.state?.index === props.state?.routes?.findIndex((r: any) => r.name === item.route);
+              return (
+                <Pressable
+                  key={item.route}
+                  style={({ pressed }) => [styles.navItem, focused && styles.navItemActive, pressed && { opacity: 0.85 }]}
+                  onPress={() => navigate(item.route)}
+                >
+                  {focused && <View style={styles.navRail} />}
+                  <Icon name={item.icon} size={18} color={focused ? colors.primary : tx.secondary} />
+                  <Text style={[styles.navLabel, focused && { color: colors.primary }]}>{item.label}</Text>
+                  {focused && <View style={styles.navDot} />}
+                </Pressable>
+              );
+            })}
+          </View>
+        ))}
       </ScrollView>
     </View>
   );
@@ -102,8 +105,12 @@ export default function Layout() {
         },
         drawerActiveTintColor: colors.primary,
         drawerInactiveTintColor: colors.onSurface,
+        sceneStyle: { backgroundColor: colors.bgDeep },
         swipeEnabled: true,
         swipeMinDistance: 10,
+        swipeEdgeWidth: 60,
+        drawerType: 'slide',
+        overlayColor: 'transparent',
       }}
     >
       <Drawer.Screen
@@ -155,23 +162,31 @@ const styles = StyleSheet.create({
   body: { flex: 1 },
   bodyContent: { paddingBottom: spacing.xl, flexGrow: 1 },
   sectionLabel: {
-    ...typography.label, color: colors.primary,
-    paddingHorizontal: spacing.lg, marginBottom: spacing.sm, marginTop: spacing.sm,
+    ...typography.label, color: tx.tertiary,
+    paddingHorizontal: spacing.lg, marginBottom: spacing.sm, marginTop: spacing.md,
   },
   navItem: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
     paddingVertical: spacing.sm, paddingHorizontal: spacing.lg,
     marginHorizontal: spacing.sm, borderRadius: radius.card,
+    position: 'relative',
   },
-  navItemActive: { backgroundColor: colors.glassBg },
-  navLabel: { ...typography.bodySmall, color: colors.onSurface },
-  divider: { height: 1, backgroundColor: colors.glassBorder, marginVertical: spacing.sm, marginHorizontal: spacing.lg },
-  glanceSection: { paddingHorizontal: spacing.sm, gap: 2 },
-  glanceItem: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
-    paddingVertical: spacing.sm, paddingHorizontal: spacing.lg,
-    borderRadius: radius.card,
+  navItemActive: { backgroundColor: 'rgba(0,229,242,0.06)' },
+  navRail: {
+    position: 'absolute',
+    left: 0,
+    top: 8,
+    bottom: 8,
+    width: 2,
+    borderRadius: 1,
+    backgroundColor: colors.primary,
   },
-  glanceItemPressed: { backgroundColor: colors.glassBg, opacity: 0.85 },
-  glanceLabel: { color: colors.onSurface, fontSize: 14, fontWeight: '500' },
+  navDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: colors.primary,
+    marginLeft: 'auto',
+  },
+  navLabel: { ...typography.bodySmall, color: tx.secondary },
 });

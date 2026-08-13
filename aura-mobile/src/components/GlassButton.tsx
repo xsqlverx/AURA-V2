@@ -1,7 +1,7 @@
-import { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 import { Pressable, Text, StyleSheet, ActivityIndicator, ViewStyle, StyleProp } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
-import { glass, semantic, text, accent } from '../tokens/colors';
+import { glass, text, accent } from '../tokens/colors';
 import { radius } from '../tokens/radius';
 import { typography } from '../tokens/typography';
 import { spacing } from '../tokens/spacing';
@@ -9,9 +9,11 @@ import { spring } from '../tokens/animation';
 import { haptic } from '../motion/haptics';
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
+type Size = 'sm' | 'md' | 'lg';
 
 type Props = {
   variant?: Variant;
+  size?: Size;
   onPress: () => void;
   children: string;
   disabled?: boolean;
@@ -20,15 +22,22 @@ type Props = {
   hapticFeedback?: boolean;
 };
 
-const VARIANT_CONFIG: Record<Variant, { bg: string; textColor: string; border: string | null }> = {
-  primary: { bg: accent.cyan, textColor: text.inverse, border: null },
-  secondary: { bg: glass.bg, textColor: text.primary, border: glass.border },
-  ghost: { bg: 'transparent', textColor: text.secondary, border: null },
-  danger: { bg: 'rgba(255,69,58,0.15)', textColor: semantic.error, border: semantic.error + '4D' },
+const VARIANT_CONFIG: Record<Variant, { bg: string; textColor: string; border: string | null; pressBg: string }> = {
+  primary: { bg: 'rgba(0,229,242,0.12)', textColor: text.primary, border: 'rgba(0,229,242,0.35)', pressBg: 'rgba(0,229,242,0.20)' },
+  secondary: { bg: glass.glass1, textColor: text.primary, border: glass.border, pressBg: 'rgba(255,255,255,0.08)' },
+  ghost: { bg: 'transparent', textColor: text.secondary, border: null, pressBg: 'rgba(255,255,255,0.06)' },
+  danger: { bg: 'rgba(255,90,97,0.12)', textColor: '#FF7C82', border: 'rgba(255,90,97,0.3)', pressBg: 'rgba(255,90,97,0.2)' },
+};
+
+const SIZE_HEIGHTS: Record<Size, number> = {
+  sm: 36,
+  md: 44,
+  lg: 52,
 };
 
 export default function GlassButton({
   variant = 'primary',
+  size = 'md',
   onPress,
   children,
   disabled = false,
@@ -38,26 +47,30 @@ export default function GlassButton({
 }: Props) {
   const config = VARIANT_CONFIG[variant];
   const scale = useSharedValue(1);
-  const opacity = useSharedValue(1);
-  const isPressed = useRef(false);
+  const pressBgOpacity = useSharedValue(0);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
-    opacity: opacity.value,
+  }));
+
+  const bgStyle = useAnimatedStyle(() => ({
+    backgroundColor: config.pressBg,
+    opacity: pressBgOpacity.value,
   }));
 
   const handlePressIn = useCallback(() => {
     if (disabled || loading) return;
-    isPressed.current = true;
-    scale.value = withSpring(0.94, spring.default);
-    opacity.value = withSpring(0.85, spring.default);
-    if (hapticFeedback) haptic.press();
-  }, [disabled, loading]);
+    scale.value = withSpring(0.97, spring.micro);
+    pressBgOpacity.value = withSpring(1, spring.micro);
+    if (hapticFeedback) {
+      if (variant === 'danger') haptic.longPress();
+      else haptic.press();
+    }
+  }, [disabled, loading, variant]);
 
   const handlePressOut = useCallback(() => {
-    isPressed.current = false;
-    scale.value = withSpring(1, spring.default);
-    opacity.value = withSpring(1, spring.default);
+    scale.value = withSpring(1, spring.micro);
+    pressBgOpacity.value = withSpring(0, spring.micro);
   }, []);
 
   return (
@@ -65,7 +78,7 @@ export default function GlassButton({
       <Pressable
         style={[
           styles.base,
-          { backgroundColor: config.bg },
+          { backgroundColor: config.bg, height: SIZE_HEIGHTS[size] },
           config.border && { borderWidth: 1, borderColor: config.border },
           (disabled || loading) && styles.disabled,
           style,
@@ -75,6 +88,7 @@ export default function GlassButton({
         onPressOut={handlePressOut}
         disabled={disabled || loading}
       >
+        {config.border && <Animated.View style={[StyleSheet.absoluteFill, styles.pressLayer, bgStyle]} />}
         {loading ? (
           <ActivityIndicator size="small" color={config.textColor} />
         ) : (
@@ -87,19 +101,25 @@ export default function GlassButton({
 
 const styles = StyleSheet.create({
   base: {
-    borderRadius: radius.full,
-    paddingVertical: 14,
+    borderRadius: radius.sm,
     paddingHorizontal: spacing.space20,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
     minWidth: 120,
+    overflow: 'hidden',
+  },
+  pressLayer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   disabled: {
     opacity: 0.4,
   },
   text: {
     ...typography.caption,
-    fontWeight: '600',
   },
 });

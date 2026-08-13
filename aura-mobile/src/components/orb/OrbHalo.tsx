@@ -4,24 +4,27 @@ import Animated, {
   interpolate,
   SharedValue,
 } from 'react-native-reanimated';
-import { useHaloRotation, useAnimatedOpacity } from './OrbAnimations';
+import { useRingRotation, useAnimatedOpacity } from './OrbAnimations';
 import type { StateConfig } from './OrbTypes';
 
 type Props = {
   size: number;
   config: StateConfig;
   pulse: SharedValue<number>;
+  speech: SharedValue<number>;
+  reduced: boolean;
 };
 
-export default function OrbHalo({ size, config, pulse }: Props) {
-  const { haloStyle } = useHaloRotation(config.haloRotationSpeed, config.haloVisible);
+export default function OrbHalo({ size, config, pulse, speech, reduced }: Props) {
+  const { ringRotationStyle } = useRingRotation(config.haloRotationMs, reduced);
   const { opacityStyle } = useAnimatedOpacity(config.haloVisible, 400);
-
-  const haloDiameter = size * 1.5;
+  const haloDiameter = size * 1.55;
 
   const ringStyle = useAnimatedStyle(() => {
-    const opacity = interpolate(pulse.value, [0, 1], [0.05, 0.15]);
-    return { opacity };
+    const energy = config.speechDriven
+      ? interpolate(speech.value, [0.15, 0.6], [0.05, 0.16])
+      : interpolate(pulse.value, [0, 1], [0.06, 0.14]);
+    return { opacity: energy };
   });
 
   if (!config.haloVisible) return null;
@@ -36,7 +39,7 @@ export default function OrbHalo({ size, config, pulse }: Props) {
           borderRadius: haloDiameter / 2,
           borderColor: config.ringsColor,
         },
-        haloStyle,
+        ringRotationStyle,
         opacityStyle,
         ringStyle,
       ]}
@@ -48,7 +51,6 @@ export default function OrbHalo({ size, config, pulse }: Props) {
 const styles = StyleSheet.create({
   halo: {
     position: 'absolute',
-    borderWidth: 1.5,
-    borderStyle: 'dashed',
+    borderWidth: 1,
   },
 });

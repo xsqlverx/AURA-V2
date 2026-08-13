@@ -83,6 +83,7 @@ const MAP: Record<string, keyof typeof Lucide> = {
   'briefcase': 'Briefcase',
   'camera': 'Camera',
   'cloud': 'Cloud',
+  'cloud-off': 'CloudOff',
   'compass': 'Compass',
   'database': 'Database',
   'download': 'Download',

@@ -162,7 +162,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.space20,
     paddingTop: spacing.space12,
     paddingBottom: spacing.space8,
-    backgroundColor: '#0A0A0A',
+    backgroundColor: '#0B1017',
   },
   searchRow: {
     flexDirection: 'row',

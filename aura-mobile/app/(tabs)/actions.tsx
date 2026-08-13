@@ -5,10 +5,11 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useNavigation } from '@react-navigation/native';
-import type { DrawerNavigationProp } from '@react-navigation/drawer';
+import { useNavigation } from 'expo-router';
+import type { DrawerNavigationProp } from 'expo-router/drawer';
 import * as Clipboard from 'expo-clipboard';
 import Animated, { FadeInDown } from 'react-native-reanimated';
+import * as WebBrowser from 'expo-web-browser';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import {
   systemLock, systemSleep, systemShutdown, systemRestart,
@@ -26,7 +27,7 @@ import Slider from '@react-native-community/slider';
 
 function WeatherWidget({ data }: { data: any }) {
   if (!data) return null;
-  const desc = typeof data === 'string' ? data : data.description || data.weather || '';
+  const desc = typeof data === 'string' ? data : data.condition || data.description || data.weather || '';
   const temp = data.temp ?? '';
   return (
     <GlassCard glow="cyan">
@@ -383,6 +384,14 @@ function NewsSection() {
 
   if (headlines.length === 0) return null;
 
+  const openHeadline = (h: any) => {
+    if (h.url) {
+      WebBrowser.openBrowserAsync(h.url).catch(() => {});
+    } else {
+      Alert.alert('News', h.title);
+    }
+  };
+
   return (
     <View style={styles.newsSection}>
       <View style={styles.sectionHeader}>
@@ -390,10 +399,12 @@ function NewsSection() {
         <Text style={styles.sectionLabel}>HEADLINES</Text>
       </View>
       {headlines.map((h, i) => (
-        <GlassCard key={i}>
-          <Text style={styles.newsTitle} numberOfLines={2}>{h.title}</Text>
-          <Text style={styles.newsSource}>{h.source}</Text>
-        </GlassCard>
+        <Pressable key={i} onPress={() => openHeadline(h)} style={({ pressed }) => [pressed && { opacity: 0.7 }]}>
+          <GlassCard>
+            <Text style={styles.newsTitle} numberOfLines={2}>{h.title}</Text>
+            <Text style={styles.newsSource}>{h.source}</Text>
+          </GlassCard>
+        </Pressable>
       ))}
     </View>
   );
@@ -504,7 +515,7 @@ const styles = StyleSheet.create({
   weatherCard: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
   },
-  weatherTemp: { ...typography.displayLg, fontSize: 28 },
+  weatherTemp: { ...typography.displayLg, fontSize: 28, color: colors.onSurface },
   weatherDesc: { color: colors.onSurface, fontSize: 13, marginTop: 2, textTransform: 'capitalize' },
   briefingBtn: {
     backgroundColor: colors.glassBg, borderRadius: radius.card, padding: spacing.lg,

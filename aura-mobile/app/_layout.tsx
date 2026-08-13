@@ -15,10 +15,13 @@ import { GlanceProvider } from '../src/components/glances';
 import { AmbientProvider, AmbientEventWiring, AmbientContextUpdater } from '../src/ambient';
 import { DesktopPresenceProvider } from '../src/desktop';
 import { useSettings } from '../src/stores/settingsStore';
+import { LOCK_MODE_MS } from '../src/stores/settingsStore';
 import { useWs } from '../src/stores/wsStore';
 import { useAuth } from '../src/stores/authStore';
 import BootSequence from '../src/components/BootSequence';
 import LockScreen from '../src/components/LockScreen';
+import ConnectionBanner from '../src/components/ConnectionBanner';
+import AmbientBackground from '../src/components/AmbientBackground';
 import { colors } from '../src/theme';
 
 const PLACEHOLDER = 'http://100.100.100.100:8000';
@@ -31,13 +34,14 @@ export default function RootLayout() {
     PlusJakartaSans_600SemiBold,
     PlusJakartaSans_700Bold,
   });
-  const { load, isLoaded, backendUrl } = useSettings();
+  const { load, isLoaded, backendUrl, lockMode } = useSettings();
   const { locked, init: initAuth } = useAuth();
   const wsConnect = useWs((s) => s.connect);
   const wsDisconnect = useWs((s) => s.disconnect);
   const router = useRouter();
   const segments = useSegments();
   const appState = useRef(AppState.currentState);
+  const lockTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Init settings + auth
   useEffect(() => {
@@ -45,16 +49,40 @@ export default function RootLayout() {
     initAuth();
   }, []);
 
-  // Re-lock on background
+  // Configurable auto-lock on background. Lock fires only after the configured
+  // delay from the moment the app actually left the foreground (or immediately
+  // for "exit"), so transient permission dialogs no longer slam the lock.
   useEffect(() => {
-    const sub = AppState.addEventListener('change', (next) => {
-      if (appState.current.match(/active/) && next.match(/inactive|background/)) {
-        useAuth.getState().lock();
+    const clearLockTimer = () => {
+      if (lockTimer.current) {
+        clearTimeout(lockTimer.current);
+        lockTimer.current = null;
       }
+    };
+
+    const sub = AppState.addEventListener('change', (next) => {
       appState.current = next;
+
+      if (next === 'active') {
+        // User came back before the timeout — cancel pending lock
+        clearLockTimer();
+        return;
+      }
+
+      if (next === 'inactive' || next === 'background') {
+        // Left the foreground. Schedule the lock after the configured delay.
+        clearLockTimer();
+        useAuth.getState().lockEnabled && (lockTimer.current = setTimeout(() => {
+          if (appState.current !== 'active') useAuth.getState().lock();
+        }, LOCK_MODE_MS[lockMode] ?? LOCK_MODE_MS.exit));
+      }
     });
-    return () => sub.remove();
-  }, []);
+
+    return () => {
+      sub.remove();
+      clearLockTimer();
+    };
+  }, [lockMode]);
 
   // Redirect to setup if needed
   useEffect(() => {
@@ -89,11 +117,17 @@ export default function RootLayout() {
         <StatusBar style="light" />
         <NavigationBar style="light" />
 
+        {/* Screen-level ambient lighting */}
+        <AmbientBackground />
+
         {/* Boot sequence overlay */}
         {!booted && <BootSequence onComplete={() => setBooted(true)} />}
 
         {/* Auth lock overlay */}
         {booted && locked && <LockScreen />}
+
+        {/* Connection status banner — flashing red when backend unreachable */}
+        {showContent && <ConnectionBanner />}
 
         {/* Main app */}
         {showContent && (
@@ -104,10 +138,10 @@ export default function RootLayout() {
               <AmbientEventWiring />
               <Stack
               screenOptions={{
-                headerStyle: { backgroundColor: colors.bgDeep },
+                headerStyle: { backgroundColor: 'transparent' },
                 headerTintColor: colors.primary,
                 headerTitleStyle: { fontWeight: '600' },
-                contentStyle: { backgroundColor: colors.bgDeep },
+                contentStyle: { backgroundColor: 'transparent' },
               }}
             >
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />

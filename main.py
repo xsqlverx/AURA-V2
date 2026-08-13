@@ -63,6 +63,34 @@ if __name__ == "__main__":
 
     print_banner()
 
+    _lock_path = Path(__file__).parent / "data" / "aura.pid"
+    _lock_path.parent.mkdir(exist_ok=True)
+    import psutil
+    _own_pid = str(os.getpid())
+    try:
+        _fh = open(_lock_path, "x")
+        _fh.write(_own_pid)
+        _fh.close()
+        logger.info("LOCK: pid %s acquired fresh lock", _own_pid)
+    except FileExistsError:
+        _conflict = False
+        _old_pid = 0
+        for _ in range(5):
+            try:
+                _old_pid = int(_lock_path.read_text().strip())
+                _conflict = psutil.pid_exists(_old_pid)
+                break
+            except Exception:
+                time.sleep(0.1)
+        logger.info("LOCK: pid %s saw existing lock, holder=%d alive=%s", _own_pid, _old_pid, _conflict)
+        if _conflict:
+            logger.error("Another main.py is already running (pid %d). Exiting.", _old_pid)
+            sys.exit(0)
+        try:
+            _lock_path.write_text(_own_pid)
+        except Exception:
+            pass
+
     # Ctrl+C kills cleanly
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
@@ -72,6 +100,13 @@ if __name__ == "__main__":
 
     if not wait_for_backend():
         sys.exit(1)
+
+    try:
+        if _lock_path.exists() and _lock_path.read_text().strip() != _own_pid:
+            logger.error("Startup race lost — another main.py holds the lock. Exiting.")
+            sys.exit(0)
+    except Exception:
+        pass
 
     logger.info("UI → http://localhost:3000  |  API → http://localhost:8000")
 
@@ -134,6 +169,10 @@ if __name__ == "__main__":
             time.sleep(1)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
+        try:
+            _lock_path.unlink(missing_ok=True)
+        except Exception:
+            pass
         if tts is not None:
             try:
                 tts.stop()

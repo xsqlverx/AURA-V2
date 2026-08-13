@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { View, StyleSheet } from 'react-native';
-import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing, interpolate } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing, SharedValue } from 'react-native-reanimated';
 import { glass } from '../tokens/colors';
 import { radius } from '../tokens/radius';
 import { spacing } from '../tokens/spacing';
@@ -11,19 +11,9 @@ type Props = {
   cardHeight?: number;
 };
 
-function ShimmerLine({ width = '100%', height = 14 }: { width?: string | number; height?: number }) {
-  const progress = useSharedValue(0);
-
-  useEffect(() => {
-    progress.value = withRepeat(
-      withTiming(1, { duration: duration.skeleton, easing: Easing.inOut(Easing.ease) }),
-      -1,
-      true
-    );
-  }, []);
-
+function SkeletonBlock({ progress, width = '100%', height = 14 }: { progress: SharedValue<number>; width?: string | number; height?: number }) {
   const animatedStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(progress.value, [0, 0.5, 1], [0.1, 0.2, 0.1]),
+    opacity: progress.value,
   }));
 
   return (
@@ -32,11 +22,21 @@ function ShimmerLine({ width = '100%', height = 14 }: { width?: string | number;
 }
 
 export default function SkeletonLoader({ lines = 3, cardHeight }: Props) {
+  const progress = useSharedValue(0.35);
+
+  useEffect(() => {
+    progress.value = withRepeat(
+      withTiming(0.65, { duration: duration.skeleton / 2, easing: Easing.inOut(Easing.ease) }),
+      -1,
+      true
+    );
+  }, []);
+
   return (
     <View style={[styles.card, cardHeight ? { height: cardHeight } : undefined]}>
-      <ShimmerLine width="60%" height={16} />
+      <SkeletonBlock progress={progress} width="60%" height={16} />
       {Array.from({ length: lines }).map((_, i) => (
-        <ShimmerLine key={i} width={i === lines - 1 ? '40%' : '100%'} />
+        <SkeletonBlock key={i} progress={progress} width={i === lines - 1 ? '40%' : '100%'} />
       ))}
     </View>
   );
@@ -44,7 +44,7 @@ export default function SkeletonLoader({ lines = 3, cardHeight }: Props) {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: glass.bg,
+    backgroundColor: glass.glass1,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: glass.border,
@@ -53,7 +53,7 @@ const styles = StyleSheet.create({
   },
   line: {
     borderRadius: radius.sm,
-    backgroundColor: glass.border,
+    backgroundColor: 'rgba(255,255,255,0.09)',
     overflow: 'hidden',
   },
 });

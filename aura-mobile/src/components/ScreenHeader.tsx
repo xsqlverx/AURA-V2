@@ -20,6 +20,7 @@ type Props = {
   onMenuPress?: () => void;
   statusVariant?: 'online' | 'offline' | 'thinking' | 'speaking';
   statusLabel?: string;
+  presenceState?: string;
 };
 
 export default function ScreenHeader({
@@ -31,8 +32,11 @@ export default function ScreenHeader({
   onMenuPress,
   statusVariant,
   statusLabel,
+  presenceState,
 }: Props) {
   const router = useRouter();
+  const presence = presenceState ?? (statusVariant && statusLabel ? statusLabel : null);
+  const presenceActive = statusVariant === 'thinking' || statusVariant === 'speaking';
 
   return (
     <View style={styles.header}>
@@ -56,10 +60,26 @@ export default function ScreenHeader({
           <Pressable onPress={() => router.back()} style={styles.backBtn}>
             <Icon name="arrow-back" size={20} color={accent.cyan} />
           </Pressable>
-          <Text style={styles.title}>{title}</Text>
+          <View>
+            <Text style={styles.title}>{title}</Text>
+            {presence && (
+              <View style={styles.presenceRow}>
+                <View style={[styles.presenceDot, { backgroundColor: presenceActive ? accent.cyan : text.tertiary }]} />
+                <Text style={styles.presenceText}>AURA ● {presence.toUpperCase()}</Text>
+              </View>
+            )}
+          </View>
         </Animated.View>
       ) : (
-        <Text style={styles.title}>{title}</Text>
+        <View>
+          <Text style={styles.title}>{title}</Text>
+          {presence && (
+            <View style={styles.presenceRow}>
+              <View style={[styles.presenceDot, { backgroundColor: presenceActive ? accent.cyan : text.tertiary }]} />
+              <Text style={styles.presenceText}>AURA ● {presence.toUpperCase()}</Text>
+            </View>
+          )}
+        </View>
       )}
 
       <Animated.View entering={FadeIn.duration(duration.normal)} style={styles.right}>
@@ -125,6 +145,23 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '500',
     letterSpacing: 0.5,
+  },
+  presenceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 2,
+  },
+  presenceDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+  },
+  presenceText: {
+    color: text.tertiary,
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 1.2,
   },
   right: {
     flexDirection: 'row',

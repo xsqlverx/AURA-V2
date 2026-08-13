@@ -5,6 +5,6 @@ export const opacity = {
   disabled: 0.4,
   pressed: 0.85,
   overlay: 0.75,
-  skeleton: 0.1,
-  skeletonHighlight: 0.2,
+  skeleton: 0.35,
+  skeletonHighlight: 0.65,
 } as const;

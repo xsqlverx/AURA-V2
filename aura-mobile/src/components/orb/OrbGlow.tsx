@@ -1,33 +1,33 @@
 import { StyleSheet } from 'react-native';
 import Animated, {
-  useSharedValue,
   useAnimatedStyle,
-  withTiming,
-  Easing,
+  interpolate,
   SharedValue,
 } from 'react-native-reanimated';
-import { useAnimatedOpacity } from './OrbAnimations';
 
 type Props = {
   size: number;
   glowColor: string;
   intensity: number;
   pulse: SharedValue<number>;
+  speech: SharedValue<number>;
+  speechDriven: boolean;
 };
 
-export default function OrbGlow({ size, glowColor, intensity, pulse }: Props) {
-  const glowSize = size * 2.5;
-  const opacityVal = useSharedValue(intensity);
+export default function OrbGlow({ size, glowColor, intensity, pulse, speech, speechDriven }: Props) {
+  const glowSize = size * 2.4;
 
   const glowStyle = useAnimatedStyle(() => {
-    const pulseBoost = 1 + pulse.value * 0.3;
+    const energy = speechDriven
+      ? interpolate(speech.value, [0.15, 0.6], [0.5, 1])
+      : 0.7 + pulse.value * 0.3;
     return {
       width: glowSize,
       height: glowSize,
       borderRadius: glowSize / 2,
       backgroundColor: glowColor,
-      opacity: intensity * pulseBoost,
-      transform: [{ scale: 1 + pulse.value * 0.1 }],
+      opacity: intensity * energy,
+      transform: [{ scale: 1 + pulse.value * 0.05 }],
     };
   });
 

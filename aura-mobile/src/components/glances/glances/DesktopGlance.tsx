@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useCallback, useState } from 'react';
 import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import GlanceHeader from '../GlanceHeader';
@@ -10,6 +10,7 @@ import { radius } from '../../../tokens/radius';
 import { useDesktopPresence } from '../../../desktop';
 import Icon from '../../Icon';
 import { duration } from '../../../tokens/animation';
+import { syncFromDesktop, getMobileBrainState } from '../../../services/memorySync';
 
 export default function DesktopGlance() {
   const { updateGlanceData } = useGlance();
@@ -18,6 +19,26 @@ export default function DesktopGlance() {
   const battery = presence.battery;
   const network = presence.network;
   const focus = presence.focus;
+  const [syncInfo, setSyncInfo] = useState<{ revision: string | null; lastSyncedAt: number | null } | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  const refreshSync = useCallback(async () => {
+    setSyncing(true);
+    try {
+      await syncFromDesktop();
+    } catch {}
+    try {
+      const s = await getMobileBrainState();
+      setSyncInfo({ revision: s.revision, lastSyncedAt: s.lastSyncedAt });
+    } catch {}
+    setSyncing(false);
+  }, []);
+
+  useEffect(() => {
+    getMobileBrainState().then((s) => {
+      setSyncInfo({ revision: s.revision, lastSyncedAt: s.lastSyncedAt });
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (stats) updateGlanceData('desktop', {
@@ -81,6 +102,25 @@ export default function DesktopGlance() {
             )}
           </View>
         )}
+
+        <Pressable onPress={refreshSync} disabled={syncing} style={styles.syncCard}>
+          <View style={styles.syncHeader}>
+            <View style={styles.syncRow}>
+              <Icon name="cloud" size={14} color={accent.cyan} />
+              <Text style={styles.syncLabel}>Brain Sync</Text>
+            </View>
+            {syncing ? (
+              <Text style={styles.syncStatus}>syncing…</Text>
+            ) : syncInfo?.lastSyncedAt ? (
+              <Text style={styles.syncStatus}>synced</Text>
+            ) : (
+              <Text style={[styles.syncStatus, { color: text.tertiary }]}>tap to sync</Text>
+            )}
+          </View>
+          {syncInfo?.revision && (
+            <Text style={styles.syncRev} numberOfLines={1}>rev {syncInfo.revision}</Text>
+          )}
+        </Pressable>
 
         <View style={styles.grid}>
           <MetricBlock label="CPU" value={`${stats?.cpu_percent ?? '--'}`} unit="%" color={cpuC} icon="cpu" delay={100} />
@@ -217,6 +257,42 @@ const styles = StyleSheet.create({
     color: text.secondary,
     flex: 1,
     textAlign: 'right',
+  },
+  syncCard: {
+    backgroundColor: glass.bg,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: `${accent.cyan}20`,
+    padding: spacing.space12,
+    marginBottom: spacing.space12,
+    gap: spacing.space4,
+  },
+  syncHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  syncRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.space8,
+  },
+  syncLabel: {
+    ...typography.bodySmall,
+    color: text.primary,
+    fontWeight: '600',
+  },
+  syncStatus: {
+    ...typography.caption,
+    color: accent.cyan,
+    fontSize: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  syncRev: {
+    ...typography.mono,
+    fontSize: 10,
+    color: text.tertiary,
   },
   grid: {
     flexDirection: 'row',

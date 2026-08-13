@@ -67,18 +67,24 @@ async def _fetch_location() -> Optional[dict]:
     return None
 
 
-async def _fetch_weather() -> Optional[dict]:
+async def _fetch_weather(lat: Optional[float] = None, lon: Optional[float] = None) -> Optional[dict]:
     """Fetch weather from Open-Meteo (free, no key).
+    Uses provided lat/lon (from mobile GPS) or falls back to IP geolocation.
     Returns {city, region, temp, condition, icon} or None."""
     try:
-        loc = await _fetch_location()
-        if not loc:
-            return None
+        if lat is None or lon is None:
+            loc = await _fetch_location()
+            if not loc:
+                return None
+            lat, lon = loc["lat"], loc["lon"]
+            city, region = loc["city"], loc["region"]
+        else:
+            city, region = "Your location", ""
 
         async with httpx.AsyncClient(timeout=10) as client:
             url = (
                 f"https://api.open-meteo.com/v1/forecast"
-                f"?latitude={loc['lat']}&longitude={loc['lon']}"
+                f"?latitude={lat}&longitude={lon}"
                 f"&current_weather=true"
             )
             r = await client.get(url)
@@ -89,8 +95,8 @@ async def _fetch_weather() -> Optional[dict]:
             desc = WMO_CODES.get(code, "Unknown")
             icon = WMO_ICONS.get(code, "❓")
             return {
-                "city": loc["city"],
-                "region": loc["region"],
+                "city": city,
+                "region": region,
                 "temp": f"{temp}°" if temp != "" else "",
                 "condition": desc,
                 "icon": icon,
@@ -102,16 +108,28 @@ async def _fetch_weather() -> Optional[dict]:
 
 # ── Public ────────────────────────────────────────────────────────────────────
 
-async def get_weather_data() -> dict:
+async def get_weather_data(lat: Optional[float] = None, lon: Optional[float] = None) -> dict:
     """
     Return structured weather data: { city, region, temp, condition, icon }.
     Uses cached weather if fresh. Preserves previous values on refresh failure.
+    Accepts optional lat/lon supplied by the mobile client for accurate weather.
     """
     global _cache
 
     now = time.time()
 
-    if now - _cache["fetched_at"] > _CACHE_TTL:
+    if lat is not None or lon is not None:
+        weather = await _fetch_weather(lat, lon)
+        if weather:
+            _cache.update({
+                "city": weather["city"],
+                "region": weather["region"],
+                "weather": weather,
+                "fetched_at": now,
+            })
+        else:
+            _cache["fetched_at"] = now
+    elif now - _cache["fetched_at"] > _CACHE_TTL:
         weather = await _fetch_weather()
         if weather:
             _cache.update({
