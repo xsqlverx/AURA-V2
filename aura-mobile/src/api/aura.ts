@@ -12,6 +12,23 @@ export function configure(baseUrl: string, apiKey: string) {
 export function getBaseUrl() { return _baseUrl; }
 export function getApiKey() { return _apiKey; }
 
+const DEFAULT_TIMEOUT_MS = 8000;
+
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const signal = options.signal;
+  if (signal) {
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function request(path: string, options: RequestInit = {}) {
   const url = `${_baseUrl}${path}`;
   const headers: Record<string, string> = {
@@ -21,7 +38,7 @@ async function request(path: string, options: RequestInit = {}) {
   if (!(options.body instanceof FormData)) {
     headers['Content-Type'] = 'application/json';
   }
-  const res = await fetch(url, { ...options, headers });
+  const res = await fetchWithTimeout(url, { ...options, headers });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(`${res.status}: ${text.slice(0, 100)}`);
@@ -35,12 +52,22 @@ export async function chat(
   message: string,
   history: { role: string; content: string }[] = [],
   mode: string = 'deep',
-  onChunk: (text: string) => void
+  onChunk: (text: string) => void,
+  signal?: AbortSignal
 ): Promise<string> {
-  const res = await request('/chat', {
+  const res = await fetchWithTimeout(`${_baseUrl}/chat`, {
     method: 'POST',
+    headers: {
+      Authorization: `Bearer ${_apiKey}`,
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify({ message, history, mode }),
+    signal,
   });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`${res.status}: ${text.slice(0, 100)}`);
+  }
   const reader = res.body?.getReader();
   if (!reader) throw new Error('No response body');
   const decoder = new TextDecoder();
@@ -58,7 +85,7 @@ export async function chat(
 // ── Health ───────────────────────────────────────────────────────────
 
 export async function getHealth() {
-  const res = await fetch(`${_baseUrl}/health`);
+  const res = await fetchWithTimeout(`${_baseUrl}/health`);
   return res.json();
 }
 

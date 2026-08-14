@@ -1,8 +1,9 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import {
   View, Text, FlatList, Pressable, StyleSheet,
-  SafeAreaView, RefreshControl, Alert, Platform,
+  RefreshControl, Alert, Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { useNavigation } from 'expo-router';
 import type { DrawerNavigationProp } from 'expo-router/drawer';
@@ -20,6 +21,7 @@ export default function ProcessesScreen() {
   const [processes, setProcesses] = useState<Proc[]>([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState('');
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [count, setCount] = useState(0);
   const [showSystem, setShowSystem] = useState(false);
   const [killing, setKilling] = useState<number | null>(null);
@@ -78,6 +80,7 @@ export default function ProcessesScreen() {
             style={({ pressed }) => [styles.killBtn, pressed && { opacity: 0.85 }]}
             onPress={() => handleKill(item)}
             disabled={killing === item.pid}
+            hitSlop={12}
           >
             <MaterialIcons name={killing === item.pid ? 'hourglass-empty' : 'close'} size={14} color={colors.error} />
           </Pressable>
@@ -103,13 +106,18 @@ export default function ProcessesScreen() {
           <GlassInput
             style={styles.search}
             value={filter}
-            onChangeText={(t) => { setFilter(t); loadProcesses(t, showSystem); }}
+            onChangeText={(t) => {
+              setFilter(t);
+              if (debounceRef.current) clearTimeout(debounceRef.current);
+              debounceRef.current = setTimeout(() => loadProcesses(t, showSystem), 300);
+            }}
             placeholder="Filter processes..."
           />
         </View>
         <Pressable
           style={({ pressed }) => [styles.sysToggle, showSystem && styles.sysToggleActive, pressed && { opacity: 0.85 }]}
           onPress={toggleSystem}
+          hitSlop={8}
         >
           <MaterialIcons name="settings-ethernet" size={14} color={showSystem ? colors.primary : colors.onSurfaceMuted} />
           <Text style={[styles.sysToggleText, showSystem && { color: colors.primary }]}>SYS</Text>
@@ -124,6 +132,7 @@ export default function ProcessesScreen() {
           <RefreshControl refreshing={loading} onRefresh={() => loadProcesses(filter, showSystem)} tintColor={colors.primary} colors={[colors.primary]} />
         }
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         ListEmptyComponent={
           <View style={styles.center}>
             <MaterialIcons name="developer-board" size={40} color={colors.onSurfaceDim} />
@@ -171,7 +180,7 @@ const styles = StyleSheet.create({
   itemPid: { ...typography.mono, color: colors.onSurface, marginTop: 2 },
   killBtn: {
     backgroundColor: 'rgba(255,69,58,0.12)', borderRadius: spacing.sm,
-    width: 30, height: 30, alignItems: 'center', justifyContent: 'center',
+    width: 44, height: 44, alignItems: 'center', justifyContent: 'center',
     borderWidth: 1, borderColor: colors.error + '30',
   },
   center: { alignItems: 'center', paddingTop: 80, gap: spacing.sm },

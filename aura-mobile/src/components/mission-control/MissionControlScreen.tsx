@@ -1,7 +1,7 @@
-import { useCallback, useMemo, useState, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import {
   View, Pressable, StyleSheet, SafeAreaView, PanResponder, Text,
-  Dimensions, StatusBar,
+  Dimensions,
 } from 'react-native';
 import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -54,6 +54,14 @@ export default function MissionControlScreen() {
   const orbState: OrbState = isConnected
     ? (wsConnected ? wsState : 'idle')
     : 'disconnected';
+
+  useEffect(() => {
+    if (!isConnected) {
+      const t = setTimeout(() => setHasError(true), 2500);
+      return () => clearTimeout(t);
+    }
+    setHasError(false);
+  }, [isConnected]);
 
   const cards: CardData[] = useMemo(() => {
     const result: CardData[] = [];
@@ -147,9 +155,7 @@ export default function MissionControlScreen() {
     ? 'Sync error'
     : 'Could not load data';
 
-  const statusBarHeight = StatusBar.currentHeight ?? 0;
-  const orbTop = Math.max(insets.top + statusBarHeight + spacing.space16,
-    SCREEN_HEIGHT * 0.08);
+  const orbTop = Math.max(insets.top + spacing.space16, SCREEN_HEIGHT * 0.08);
 
   return (
     <View style={styles.container} {...panResponder.panHandlers}>

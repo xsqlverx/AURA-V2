@@ -1,4 +1,5 @@
-import { SafeAreaView, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../../src/theme';
 import GlanceHeader from '../../src/components/glances/GlanceHeader';
 import ActivityLog from '../../src/components/ActivityLog';

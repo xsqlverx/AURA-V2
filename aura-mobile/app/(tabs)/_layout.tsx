@@ -48,7 +48,8 @@ function CustomDrawerContent(props: any) {
   const router = useRouter();
 
   const navigate = (route: string) => {
-    router.push(`/(tabs)/${route}` as any);
+    if (route === 'index') router.navigate('/');
+    else router.navigate(`/(tabs)/${route}` as any);
   };
 
   return (

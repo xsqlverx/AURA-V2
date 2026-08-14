@@ -4,7 +4,7 @@ import {
   SafeAreaView, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useSettings } from '../src/stores/settingsStore';
+import { useSettings, DEFAULT_BACKEND_URL } from '../src/stores/settingsStore';
 import { getHealth } from '../src/api/aura';
 import { colors, spacing, radius, typography } from '../src/theme';
 import GlassCard from '../src/components/GlassCard';
@@ -40,7 +40,7 @@ export default function SetupScreen() {
   };
 
   const handleSkip = () => {
-    save(url.trim() || 'http://100.100.100.100:8000', key.trim() || 'testkey123');
+    save(url.trim() || DEFAULT_BACKEND_URL, key.trim() || 'testkey123');
     router.replace('/');
   };
 
@@ -48,7 +48,7 @@ export default function SetupScreen() {
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
         style={styles.inner}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View style={styles.hero}>
           <Text style={styles.orb}>◎</Text>

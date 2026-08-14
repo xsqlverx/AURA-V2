@@ -1,8 +1,9 @@
 import { useState, useCallback } from 'react';
 import {
-  View, Text, FlatList, Pressable, StyleSheet,
-  SafeAreaView, Alert, RefreshControl, Platform,
+  View, Text, FlatList, Pressable, StyleSheet, ScrollView,
+  Alert, RefreshControl, Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { useNavigation } from 'expo-router';
 import type { DrawerNavigationProp } from 'expo-router/drawer';
@@ -97,11 +98,11 @@ export default function NotesScreen() {
           <Text style={styles.headerTitle} numberOfLines={1}>{selected.title}</Text>
           <View style={{ width: 40 }} />
         </View>
-        <View style={styles.noteContentWrap}>
+        <ScrollView style={styles.noteContentWrap} contentContainerStyle={{ padding: spacing.lg }}>
           <GlassCard>
             <Text style={styles.noteContent}>{selected.content}</Text>
           </GlassCard>
-        </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -144,7 +145,7 @@ export default function NotesScreen() {
 
       <FlatList
         data={notes}
-        keyExtractor={(item, i) => item.title + i}
+        keyExtractor={(item) => item.title}
         renderItem={renderItem}
         contentContainerStyle={styles.list}
         refreshControl={

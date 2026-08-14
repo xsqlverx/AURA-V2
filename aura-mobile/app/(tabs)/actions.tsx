@@ -1,8 +1,9 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   View, Text, Pressable, ScrollView, StyleSheet,
-  SafeAreaView, Alert, RefreshControl, ActivityIndicator, Platform,
+  Alert, RefreshControl, ActivityIndicator, Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useNavigation } from 'expo-router';
@@ -140,8 +141,6 @@ function VolumeControl() {
   const [vol, setVol] = useState<number | null>(null);
   const [displayVol, setDisplayVol] = useState(50);
   const [loading, setLoading] = useState(false);
-  const lastCommitRef = useRef(0);
-  const isCommittingRef = useRef(false);
   const loadVol = async () => {
     try {
       const res = await getVolume();
@@ -150,28 +149,16 @@ function VolumeControl() {
   };
   useEffect(() => { loadVol(); }, []);
 
-  const commitVolume = useCallback(async (value: number) => {
-    if (isCommittingRef.current) return;
-    const now = Date.now();
-    if (now - lastCommitRef.current < 250) return;
-    lastCommitRef.current = now;
-    isCommittingRef.current = true;
-    try {
-      await setVolume(value);
-      setVol(value);
-    } catch (e: any) { Alert.alert('Error', e.message); }
-    finally { isCommittingRef.current = false; }
-  }, []);
-
   const handleSlidingComplete = useCallback(async (value: number) => {
-    if (vol === value) return;
+    const rounded = Math.round(value);
+    setDisplayVol(rounded);
     setLoading(true);
     try {
-      await setVolume(value);
-      setVol(value);
+      await setVolume(rounded);
+      setVol(rounded);
     } catch (e: any) { Alert.alert('Error', e.message); }
     finally { setLoading(false); }
-  }, [vol]);
+  }, []);
 
   return (
     <GlassCard>
@@ -188,10 +175,7 @@ function VolumeControl() {
         maximumValue={100}
         step={1}
         value={displayVol}
-        onValueChange={(v) => {
-          setDisplayVol(v);
-          commitVolume(v);
-        }}
+        onValueChange={(v) => setDisplayVol(v)}
         onSlidingComplete={handleSlidingComplete}
         minimumTrackTintColor={colors.primary}
         maximumTrackTintColor="rgba(255,255,255,0.1)"
@@ -221,11 +205,11 @@ function NowPlaying() {
       }
     } catch { setError(true); }
   };
-  useFocusEffect(useCallback(() => { load(); }, []));
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
+    load();
     const iv = setInterval(load, 10000);
     return () => clearInterval(iv);
-  }, []);
+  }, []));
 
   if (!track && error) return null;
   if (!track) return null;
@@ -454,6 +438,7 @@ export default function ActionsScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} colors={[colors.primary]} />
         }
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
         <WeatherWidget data={weather} />
         <BriefingButton />

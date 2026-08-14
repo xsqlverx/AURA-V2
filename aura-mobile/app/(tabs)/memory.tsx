@@ -1,8 +1,9 @@
 import { useState, useCallback } from 'react';
 import {
   View, Text, FlatList, Pressable, StyleSheet,
-  SafeAreaView, RefreshControl, Alert, Modal, Platform, KeyboardAvoidingView,
+  RefreshControl, Alert, Modal, Platform, KeyboardAvoidingView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { useNavigation } from 'expo-router';
 import type { DrawerNavigationProp } from 'expo-router/drawer';

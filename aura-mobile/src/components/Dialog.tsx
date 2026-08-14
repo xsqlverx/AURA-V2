@@ -32,6 +32,7 @@ export default function Dialog({
   return (
     <RNModal visible={visible} transparent animationType="none" onRequestClose={onCancel}>
       <Animated.View entering={FadeIn.duration(duration.normal)} exiting={FadeOut.duration(duration.normal)} style={styles.overlay}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onCancel} />
         <Animated.View entering={ZoomIn.duration(duration.deliberate).springify()} exiting={ZoomOut.duration(duration.normal)} style={styles.card}>
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.message}>{message}</Text>

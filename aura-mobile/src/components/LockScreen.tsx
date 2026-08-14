@@ -16,6 +16,7 @@ export default function LockScreen() {
   const [tryingBio, setTryingBio] = useState(true);
   const shakeAnim = useRef(new Animated.Value(0)).current;
   const inputRef = useRef<TextInput>(null);
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     if (tryingBio && lockEnabled) {
@@ -28,9 +29,12 @@ export default function LockScreen() {
     }
   }, [tryingBio, lockEnabled]);
 
-  const handlePinSubmit = async () => {
-    if (pin.length < 4) return;
-    const ok = await verifyPin(pin);
+  const submitPin = async (value: string) => {
+    if (submittingRef.current) return;
+    if (value.length < 4) return;
+    submittingRef.current = true;
+    const ok = await verifyPin(value);
+    submittingRef.current = false;
     if (ok) {
       useAuth.setState({ locked: false });
     } else {
@@ -71,11 +75,10 @@ export default function LockScreen() {
             ref={inputRef}
             style={styles.pinInput}
             value={pin}
-            onChangeText={(t) => { setPin(t); setError(''); if (t.length >= 4) setTimeout(() => handlePinSubmit(), 50); }}
+            onChangeText={(t) => { setPin(t); setError(''); if (t.length >= 4) setTimeout(() => submitPin(t), 50); }}
             keyboardType="number-pad"
             secureTextEntry
             maxLength={6}
-            autoFocus
             placeholder="• • • •"
           />
           {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -91,7 +94,7 @@ export default function LockScreen() {
                     const next = pin + key;
                     setPin(next);
                     setError('');
-                    if (next.length >= 4) setTimeout(() => handlePinSubmit(), 100);
+                    if (next.length >= 4) setTimeout(() => submitPin(next), 100);
                   }
                 }}
                 disabled={key === ''}

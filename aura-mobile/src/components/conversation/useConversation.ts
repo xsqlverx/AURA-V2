@@ -33,6 +33,7 @@ export function useConversation() {
   const stopRequestedRef = useRef(false);
   const streamBufferRef = useRef('');
   const pendingHandoffsRef = useRef<HandoffAction[]>([]);
+  const abortRef = useRef<AbortController | null>(null);
 
   // Keep ref in sync
   useEffect(() => { messagesRef.current = messages; }, [messages]);
@@ -88,15 +89,16 @@ export function useConversation() {
   const sendMessage = useCallback(async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
+    if (phase === 'processing' || phase === 'streaming' || phase === 'executing_tool') return;
 
     const userMsg: UserMessage = {
-      id: `user-${Date.now()}`,
+      id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       type: 'user',
       content: trimmed,
       timestamp: Date.now(),
     };
 
-    const responseId = `aura-${Date.now() + 1}`;
+    const responseId = `aura-${Date.now() + 1}-${Math.random().toString(36).slice(2, 7)}`;
     const responseMsg: TextMessage = {
       id: responseId,
       type: 'text',
@@ -142,6 +144,7 @@ export function useConversation() {
       setPhase('streaming');
       streamBufferRef.current = '';
       pendingHandoffsRef.current = [];
+      abortRef.current = new AbortController();
       await sendChatApi(trimmed, history, 'deep', (chunk) => {
         streamBufferRef.current += chunk;
         const { clean, actions } = extractHandoffs(streamBufferRef.current);
@@ -152,19 +155,23 @@ export function useConversation() {
           }
           return msg;
         });
-      });
+      }, abortRef.current.signal);
       for (const action of pendingHandoffsRef.current) {
         await executeHandoff(action);
       }
     } catch (e: any) {
+      if (e?.name === 'AbortError' || abortRef.current?.signal.aborted) {
+        return;
+      }
       const errMsg: ErrorMessage = {
-        id: `err-${Date.now()}`,
+        id: `err-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         type: 'error',
         content: e.message || 'An error occurred',
         timestamp: Date.now(),
       };
       setMessages((prev) => [...prev, errMsg]);
     } finally {
+      abortRef.current = null;
       setStreamingId(null);
       updateMessage(responseId, (msg) => {
         if (msg.type === 'text') return { ...msg, isStreaming: false };
@@ -236,6 +243,8 @@ export function useConversation() {
   }, []);
 
   const stopResponse = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
     setPhase('idle');
     setStreamingId(null);
   }, []);

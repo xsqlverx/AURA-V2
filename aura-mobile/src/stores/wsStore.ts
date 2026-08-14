@@ -5,6 +5,8 @@ export type OrbState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'disconn
 type WsStore = {
   state: OrbState;
   connected: boolean;
+  everConnected: boolean;
+  failed: boolean;
   _ws: WebSocket | null;
   _reconnectTimer: ReturnType<typeof setTimeout> | null;
   connect: (url: string) => void;
@@ -17,6 +19,8 @@ let connectToken = 0;
 export const useWs = create<WsStore>((set, get) => ({
   state: 'disconnected',
   connected: false,
+  everConnected: false,
+  failed: false,
   _ws: null,
   _reconnectTimer: null,
 
@@ -30,6 +34,7 @@ export const useWs = create<WsStore>((set, get) => ({
       existing.onerror = null;
       existing.close();
     }
+    set({ failed: false });
 
     const token = ++connectToken;
     const wsUrl = url.replace(/^http/, 'ws') + '/ws';
@@ -44,7 +49,7 @@ export const useWs = create<WsStore>((set, get) => ({
 
     ws.onopen = () => {
       if (token !== connectToken) return;
-      set({ connected: true });
+      set({ connected: true, everConnected: true, failed: false });
     };
 
     ws.onmessage = (e) => {
@@ -60,7 +65,7 @@ export const useWs = create<WsStore>((set, get) => ({
 
     ws.onclose = () => {
       if (token !== connectToken) return;
-      set({ connected: false, state: 'disconnected', _ws: null });
+      set({ connected: false, failed: true, state: 'disconnected', _ws: null });
       const timer = setTimeout(() => {
         if (token === connectToken) {
           get().connect(url);

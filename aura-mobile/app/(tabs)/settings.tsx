@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
-import { View, Text, Pressable, StyleSheet, SafeAreaView, Alert, Platform } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ScrollView, KeyboardAvoidingView, Alert, Platform } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useNavigation } from 'expo-router';
 import type { DrawerNavigationProp } from 'expo-router/drawer';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useSettings } from '../../src/stores/settingsStore';
+import { isConfigured } from '../../src/stores/settingsStore';
 import { LOCK_MODE_LABELS, LockMode } from '../../src/stores/settingsStore';
+import { LLM_PROVIDERS, DEFAULT_LLM_MODEL, LlmProviderId } from '../../src/stores/settingsStore';
 import { getHealth } from '../../src/api/aura';
 import { colors, spacing, radius, typography } from '../../src/theme';
 import GlassCard from '../../src/components/GlassCard';
@@ -17,9 +20,12 @@ const LOCK_MODES: LockMode[] = ['exit', '30s', '60s', '120s', '300s'];
 export default function SettingsScreen() {
   const router = useRouter();
   const navigation = useNavigation<DrawerNavigationProp<{}>>();
-  const { backendUrl, apiKey, lockMode, save, setLockMode } = useSettings();
+  const { backendUrl, apiKey, lockMode, llmApiKey, llmProvider, llmModel, save, setLockMode, saveLlm } = useSettings();
   const [url, setUrl] = useState('');
   const [key, setKey] = useState('');
+  const [llmKey, setLlmKey] = useState('');
+  const [llmProviderId, setLlmProviderId] = useState<LlmProviderId>('openrouter');
+  const [llmModelName, setLlmModelName] = useState('');
   const [testing, setTesting] = useState(false);
   const [status, setStatus] = useState<'idle' | 'ok' | 'err'>('idle');
   const [statusMsg, setStatusMsg] = useState('');
@@ -27,7 +33,10 @@ export default function SettingsScreen() {
   useEffect(() => {
     setUrl(backendUrl);
     setKey(apiKey);
-  }, [backendUrl, apiKey]);
+    setLlmKey(llmApiKey);
+    setLlmProviderId(llmProvider);
+    setLlmModelName(llmModel);
+  }, [backendUrl, apiKey, llmApiKey, llmProvider, llmModel]);
 
   const handleSave = async () => {
     if (!url.trim()) { Alert.alert('Error', 'Backend URL is required'); return; }
@@ -57,7 +66,15 @@ export default function SettingsScreen() {
     }
   };
 
-  const isConfigured = backendUrl !== 'http://100.100.100.100:8000';
+  const handleSaveLlm = async () => {
+    if (!llmKey.trim()) { Alert.alert('Error', 'LLM API key is required'); return; }
+    const providerId = LLM_PROVIDERS.some((p) => p.id === llmProviderId) ? llmProviderId : 'openrouter';
+    const model = llmModelName.trim() || DEFAULT_LLM_MODEL[providerId];
+    await saveLlm(llmKey.trim(), providerId, model);
+    Alert.alert('Saved', 'Independent brain configured');
+  };
+
+  const isConfiguredFlag = isConfigured(backendUrl);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -67,8 +84,9 @@ export default function SettingsScreen() {
         </Pressable>
         <Text style={styles.headerTitle}>Settings</Text>
       </View>
-      <View style={styles.content}>
-        {!isConfigured && (
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
+        {!isConfiguredFlag && (
           <GlassCard glow="cyan" style={styles.banner}>
             <View style={styles.bannerRow}>
               <MaterialIcons name="info-outline" size={18} color={colors.primary} />
@@ -146,6 +164,90 @@ export default function SettingsScreen() {
         ) : null}
 
         <View style={styles.sectionHeader}>
+          <MaterialIcons name="psychology" size={16} color={colors.primary} />
+          <Text style={styles.sectionLabel}>INDEPENDENT BRAIN</Text>
+        </View>
+        <GlassCard>
+          <View style={styles.lockSectionHeader}>
+            <MaterialIcons name="memory" size={16} color={colors.primary} />
+            <Text style={styles.lockSectionLabel}>OFFLINE LLM (PC OFF)</Text>
+          </View>
+          <Text style={styles.lockHint}>
+            Add your own LLM API key so AURA can reply without your PC running. Uses your on-phone memory mirror for context.
+          </Text>
+
+          <View style={styles.field}>
+            <View style={styles.labelRow}>
+              <MaterialIcons name="storage" size={14} color={colors.onSurfaceMuted} />
+              <Text style={styles.label}>Provider</Text>
+            </View>
+            <View style={styles.providerChips}>
+              {LLM_PROVIDERS.map((p) => {
+                const active = llmProviderId === p.id;
+                return (
+                  <Pressable
+                    key={p.id}
+                    onPress={() => {
+                      setLlmProviderId(p.id);
+                      if (!llmModelName.trim()) setLlmModelName(DEFAULT_LLM_MODEL[p.id]);
+                    }}
+                    style={({ pressed }) => [
+                      styles.lockChip,
+                      active && styles.lockChipActive,
+                      pressed && { opacity: 0.8 },
+                    ]}
+                  >
+                    <Text style={[styles.lockChipText, active && styles.lockChipTextActive]}>
+                      {p.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+
+          <View style={styles.field}>
+            <View style={styles.labelRow}>
+              <MaterialIcons name="key" size={14} color={colors.onSurfaceMuted} />
+              <Text style={styles.label}>LLM API Key</Text>
+            </View>
+            <GlassInput
+              style={styles.input}
+              value={llmKey}
+              onChangeText={setLlmKey}
+              placeholder="sk-..."
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry
+            />
+            <Text style={styles.hint}>
+              OpenRouter or Groq key. Only stored on this device.
+            </Text>
+          </View>
+
+          <View style={styles.field}>
+            <View style={styles.labelRow}>
+              <MaterialIcons name="smart-toy" size={14} color={colors.onSurfaceMuted} />
+              <Text style={styles.label}>Model</Text>
+            </View>
+            <GlassInput
+              style={styles.input}
+              value={llmModelName}
+              onChangeText={setLlmModelName}
+              placeholder={DEFAULT_LLM_MODEL[llmProviderId]}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+
+          <View style={styles.buttons}>
+            <GlassButton variant="primary" onPress={handleSaveLlm}>
+              Save Brain
+            </GlassButton>
+          </View>
+        </GlassCard>
+
+        <View style={styles.sectionHeader}>
           <MaterialIcons name="lock" size={16} color={colors.primary} />
           <Text style={styles.sectionLabel}>SECURITY & PRIVACY</Text>
         </View>
@@ -192,7 +294,8 @@ export default function SettingsScreen() {
             App locks after this time away instead of instantly. "On exit" locks right away.
           </Text>
         </GlassCard>
-      </View>
+      </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -210,7 +313,8 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', marginRight: 12,
   },
   headerTitle: { ...typography.headlineMd, color: colors.onSurface, fontSize: 18, letterSpacing: 1 },
-  content: { padding: spacing.lg, flex: 1, gap: spacing.lg },
+  content: { flex: 1 },
+  contentContainer: { padding: spacing.lg, gap: spacing.lg, paddingBottom: 40 },
   banner: {},
   bannerRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   bannerText: { color: colors.onSurface, fontSize: 12, lineHeight: 18, flex: 1 },
@@ -235,6 +339,7 @@ const styles = StyleSheet.create({
   securitySub: { ...typography.labelSm, color: colors.onSurface, marginTop: 2 },
   lockSectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: spacing.sm },
   lockSectionLabel: { ...typography.labelMd, color: colors.primary },
+  providerChips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   lockChips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   lockChip: {
     paddingHorizontal: spacing.md,

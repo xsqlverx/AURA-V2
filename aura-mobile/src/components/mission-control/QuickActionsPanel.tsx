@@ -1,7 +1,7 @@
 import { useCallback, useRef, useMemo, useState, useEffect } from 'react';
 import {
   View, Text, Pressable, StyleSheet, PanResponder, ScrollView,
-  Dimensions, Platform,
+  Dimensions, Platform, Alert,
 } from 'react-native';
 import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, runOnJS,
@@ -89,21 +89,21 @@ export default function QuickActionsPanel({ onClose }: Props) {
 
   const exec = useCallback(async (fn: () => Promise<any>) => {
     haptic.press();
-    try { await fn(); } catch {}
+    try { await fn(); } catch (e: any) { Alert.alert('Error', e.message || 'Action failed'); }
     setTimeout(handleClose, 300);
   }, [handleClose]);
 
   const handleVolumeChange = useCallback(async (delta: number) => {
     const next = Math.max(0, Math.min(100, volume + delta));
     setVolState(next);
-    try { await setVolume(next); } catch {}
+    try { await setVolume(next); } catch (e: any) { Alert.alert('Error', e.message || 'Volume failed'); }
   }, [volume]);
 
   const handleMute = useCallback(async () => {
     haptic.toggle();
     const next = !muted;
     setMuted(next);
-    try { await muteAudio(next); } catch {}
+    try { await muteAudio(next); } catch (e: any) { Alert.alert('Error', e.message || 'Mute failed'); }
   }, [muted]);
 
   const groups: ActionGroup[] = [

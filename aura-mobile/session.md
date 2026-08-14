@@ -10,69 +10,98 @@ CRITICAL RULE FOR OPENCODE:
 
 ## 1. Primary Objective
 
-- **Goal:** Cross-repo feature "Mobile Brain Sync": (1) offline-first memory mirror between the desktop backend and the mobile app, (2) desktop→phone action handoff where the PC LLM delegates phone-only actions (SMS, open app, share) to the Android app via a stream marker, (3) a Phone Sync widget in the PC HUD.
+- **Goal (complete):** Fix all UI/UX bugs in the AURA mobile app (Expo/React Native SDK 57, `C:\AURA_V2\aura-mobile`). All 4 waves implemented and tsc clean.
+- **Next:** EAS dev rebuild + install on device + manual test of all changed screens.
 
 ## 2. Verified State (Anti-Hallucination Anchor)
 
-- **Git Branch:** main (both C:\AURA_V2 and C:\AURA_V2\aura-mobile)
-- **TypeScript (mobile):** `npx tsc --noEmit` exits 0 — zero errors
-- **TypeScript (PC UI, C:\AURA_V2_UI):** `npx tsc --noEmit` exits 0 — zero errors
-- **Python (backend):** `from core import server, agent` exits 0
-- **Tested (via scripts in C:\AURA_V2\scripts\):**
-  - `test_handoff_tool.py` — `agent._run_tool('android_handoff', {...})` returns `{"handoff": true, "platform": "android", "action": ..., "phone_number": ..., "message": ..., "app_package": ..., "text": ...}` — PASS
-  - `test_sync_endpoints.py` — httpx.ASGITransport (lifespan skipped):
-    - `GET /memory/mobile-sync` → 200, `{revision, curated[], memories[]}`
-    - `POST /memory/mobile-sync` → 200 `{success, added_curated, added_chroma}`, dedupes exact text, revision changes after push — PASS
-  - NOTE: routes were verified in-process; the long-running server (pid on :8000, started before these edits) does NOT have the new routes until restarted.
+- **Git Repo:** `C:\AURA_V2\aura-mobile` — branch main, HEAD = `5c0922a` (uncommitted changes on top).
+- **TypeScript:** `npx tsc --noEmit` exits 0 — re-verified after ALL Wave 1-4 edits.
+- **Route bug:** FIXED — `app/(tabs)/_layout.tsx` `navigate()` special-cases `index` → `router.navigate('/')`.
+- **Black screen:** STILL NEEDS the new dev-client APK installed on the phone (expo-location fix). APK: `https://expo.dev/artifacts/eas/gpKWdmtN9u_CzQTbDoW11OWNtR7796ezuMuOqSKXGyA.apk`
 
-## 3. What Was Built
+## 3. All Work Done (Waves 1-4)
 
-### Backend (`C:\AURA_V2`)
+### Wave 1 — COMPLETE
+- Route bug fixed (`_layout.tsx` navigate)
+- Setup infinite loop fixed (`settingsStore.ts` + `setup.tsx` + `_layout.tsx`)
+- Setup KAV (Platform.OS check)
+- Settings isConfigured flag (renamed to `isConfiguredFlag`)
+- LockScreen PIN stale-closure (submitPin(value) + submittingRef + no autoFocus)
+- Home error bar (2.5s grace, clears on connected)
+- ConnectionBanner (everConnected/failed flags in wsStore)
+- Root SafeAreaProvider in `_layout.tsx`
+- Network timeouts (fetchWithTimeout 8s) + abortable chat() + useConversation abortRef
 
-- `core/server.py`:
-  - `MobileSyncPush` Pydantic model (`curated: list[dict]`, `memories: list[dict]`)
-  - `GET /memory/mobile-sync` — pulls curated (USER.md/MEMORY.md via get_store) + 50 most-recent ChromaDB entries sorted by metadata timestamp, plus a 24-char SHA-256 `revision` over curated text + entry ids
-  - `POST /memory/mobile-sync` — phoneside push: curated dedupes by exact text against existing store entries; Chroma entries go through `chroma_store.save()` (embedding-similarity dedup)
-  - Routes behind existing `mobile_auth_middleware` (Bearer MOBILE_API_KEY; localhost bypass)
-- `tools/registry.py`: added `android_handoff` schema (`action` enum: send_sms / open_app / share_sheet, plus phone_number, message, app_package, text)
-- `core/agent.py`:
-  - Dispatch `case "android_handoff":` in `_run_tool()` → returns a handoff dict
-  - Tool loop in `_run()`: when the tool name is `android_handoff`, yields `<handoff_android>{json}</handoff_android>` into the stream (phone intercepts + strips it)
-  - `AURA_PERSONA_TOOLS`: added "Android (Phone) Actions" section telling the LLM to delegate SMS/open-app/share via `android_handoff` instead of faking them on PC
+### Wave 2 — COMPLETE
+- Double headers fixed (removed redundant GlanceHeader from desktop/files/health/media wrappers)
+- Safe-area pass: RN SafeAreaView → safe-area-context in all 12 screen files
+- Settings: ScrollView + KAV wrapper for scrollability
+- Actions: NowPlaying poll gated by useFocusEffect; volume commits on sliding complete only; keyboardShouldPersistTaps
+- MediaGlance: dead seek slider hidden (backend has no duration/position); volume on sliding complete; mute button 32→44pt
+- Notes: ScrollView for detail view; stable keyExtractor (no index)
+- Stats: RefreshControl `refreshing={loading}` (was `loading && !stats`)
+- Processes: debounce filter 300ms; keyboardShouldPersistTaps; kill button 30→44pt + hitSlop
 
-### Mobile (`C:\AURA_V2\aura-mobile`)
+### Wave 3 — COMPLETE
+- MessageList: auto-scroll only when near bottom (isNearBottomRef)
+- useConversation: busy guard (blocks double-send during processing/streaming)
+- Lock behavior: enableLock sets locked:false (was locked:true → instant lock)
+- Dialog: backdrop Pressable dismiss
+- Toast: safe-area insets (was hardcoded top:60)
+- DesktopPresenceSync: dedupe /now-playing (merged syncFocus into syncMedia, removed separate focus schedule)
+- QuickActionsPanel: error surfacing for volume/mute (Alert.alert)
 
-- `src/services/handoff.ts` (NEW):
-  - `extractHandoffs(text)` — regex `<handoff_android>(.*?)</handoff_android>`, strips completed markers + any unclosed trailing marker from display text, returns parsed actions
-  - `executeHandoff(action)` — send_sms via `Linking.openURL('sms:...?body=...')`, open_app via `expo-intent-launcher` `openApplication`, share_sheet via React Native `Share.share`
-- `src/components/conversation/useConversation.ts`: streaming callback buffers chunks, strips markers, collects handoffs, then executes them after the stream ends
-- `src/services/memorySync.ts` (NEW): expo-file-system JSON store at `document://mobile_brain_sync.json`; `syncFromDesktop()` pulls GET + pushes queued entries, `queueCurated()` / `queueMemory()` for offline-first writes, `getMobileBrainState()`
-- `src/api/aura.ts`: added `pullMobileMemorySync()`, `pushMobileMemorySync()`
-- `app/(tabs)/memory.tsx`: cloud-sync button in header that calls `syncFromDesktop()` + status line
-- `src/components/glances/glances/DesktopGlance.tsx`: added "Brain Sync" card (tap to sync, shows revision + synced state)
+### Wave 4 — COMPLETE
+- Theme consolidation: `src/theme/index.ts` now re-exports from `src/theme.ts` + keeps ThemeProvider/useTheme
+- Dead code deleted: VoiceBar, CustomTabBar, GlanceHost, GlanceSheet, useShareIntent (5 files + barrel export cleanup)
+- settingsStore: removed console.warn leftover
+- Icon.tsx: already uses Circle fallback silently for unknown names (no warn to remove)
 
-### PC UI (`C:\AURA_V2_UI`)
-
-- `src/lib/api.ts`: added `fetchMobileSync()` + `MobileSyncData` type
-- `src/components/PhoneWidget.tsx` (NEW): polls `/memory/mobile-sync` every 30s, WidgetCard shows curated/recent counts, revision, fetched time; manual refresh button; empty state
-- `src/components/Views/GlancesView.tsx`: imported + added `<PhoneWidget />` to the widget grid
-
-## 4. Active WIP / Blocker
-
-- **State:** All features built and statically verified; backend routes verified in-process. NOT yet run end-to-end through a live server + real device.
-- **Next steps (untested until done):**
-  1. Restart the backend (`python main.py`) so :8000 serves the new routes, then `python Test.py`
-  2. Real handoff E2E: in chat, trigger a message the LLM routes to `android_handoff`, confirm `<handoff_android>` appears in the stream and the phone executes it (needs dev build with expo-speech-recognition / intent-launcher)
-  3. Verify PhoneWidget + memory sync button against the live server
+## 4. What's Left (post-session)
+1. **EAS dev rebuild** — `eas build --platform android --profile development`
+2. **Install APK** on phone
+3. **Manual test** all changed screens
+4. **Independent Brain** — DEFERRED until app looks clean (user's request)
+5. **Commit** — changes are uncommitted; commit when ready
 
 ## 5. Pinned Constants
+- Mobile API: `http://192.168.29.242:8000`, Bearer `testkey123`
+- Secure-store keys: `aura_backend_url`, `aura_api_key`, `aura_lock_mode`, `aura_llm_api_key`, `aura_llm_provider`, `aura_llm_model`
+- expo-location `~57.0.9`, SDK 57
+- EAS profile `development`, account sqlver / sqlvers-organization
+- Handoff marker: `<handoff_android>{json}</handoff_android>`
 
-- Mobile API default: `http://192.168.29.242:8000` (aura.ts DEFAULT_URL), Bearer `testkey123`
-- PC UI API: `http://localhost:8000`, WS `ws://localhost:8000/ws`
-- Sync store file: `Paths.document` + `mobile_brain_sync.json`
-- Sync revision: 24-char SHA-256 over curated texts + recent entry ids
-- Sync pull limit: 50 most-recent ChromaDB entries (metadata timestamp desc)
-- Handoff marker: `<handoff_android>{json}</handoff_android>` (flat, no envelope)
-- WS prefixes (existing): STATE, USER, AURA, DISCORD, DISCORD_SESSION, BRIEFING_DATA, MEMORY_ACCESS, BRIEFING_CHUNK, VOICE_CHANGED, DICTATION, PHONE_NOTIF
-- Existing WS prefixes for desktop presence: (see DesktopPresenceSync) — DesktopGlance reuses `useDesktopPresence`
-- Backend test scripts live in `C:\AURA_V2\scripts\test_handoff_tool.py` + `test_sync_endpoints.py`
+## 6. Files Modified This Session
+- `app/_layout.tsx` — SafeAreaProvider + ThemeProvider
+- `app/(tabs)/_layout.tsx` — route bug fix
+- `app/(tabs)/settings.tsx` — ScrollView + KAV + isConfiguredFlag
+- `app/(tabs)/setup.tsx` — DEFAULT_BACKEND_URL save + KAV
+- `app/(tabs)/actions.tsx` — safe-area + useFocusEffect + volume commit + keyboardShouldPersistTaps
+- `app/(tabs)/desktop.tsx` — removed GlanceHeader + safe-area swap
+- `app/(tabs)/files.tsx` — removed GlanceHeader + safe-area swap
+- `app/(tabs)/health.tsx` — removed GlanceHeader + safe-area swap
+- `app/(tabs)/media.tsx` — removed GlanceHeader + safe-area swap
+- `app/(tabs)/notes.tsx` — safe-area + ScrollView detail + stable keyExtractor
+- `app/(tabs)/stats.tsx` — safe-area + RefreshControl fix
+- `app/(tabs)/processes.tsx` — safe-area + debounce + keyboardShouldPersistTaps + 44pt kill
+- `app/(tabs)/activity.tsx` — safe-area swap
+- `app/(tabs)/memory.tsx` — safe-area swap
+- `app/(tabs)/presets.tsx` — safe-area swap
+- `src/stores/settingsStore.ts` — PLACEHOLDER_URL, DEFAULT_BACKEND_URL, isConfigured(), console.warn removed
+- `src/stores/wsStore.ts` — everConnected + failed flags
+- `src/stores/authStore.ts` — enableLock sets locked:false
+- `src/api/aura.ts` — fetchWithTimeout + abortable chat()
+- `src/components/conversation/useConversation.ts` — abortRef + busy guard + unique IDs
+- `src/components/conversation/MessageList.tsx` — near-bottom auto-scroll
+- `src/components/LockScreen.tsx` — submitPin(value) + submittingRef + no autoFocus
+- `src/components/mission-control/MissionControlScreen.tsx` — hasError wiring + orbTop fix
+- `src/components/ConnectionBanner.tsx` — shows only after failed connect
+- `src/components/Dialog.tsx` — backdrop dismiss
+- `src/components/Toast.tsx` — safe-area insets
+- `src/components/glances/glances/MediaGlance.tsx` — dead seek hidden + volume commit + 44pt mute
+- `src/components/mission-control/QuickActionsPanel.tsx` — error surfacing
+- `src/desktop/DesktopPresenceSync.ts` — dedupe /now-playing
+- `src/theme/index.ts` — re-exports theme.ts
+- DELETED: VoiceBar.tsx, CustomTabBar.tsx, GlanceHost.tsx, GlanceSheet.tsx, useShareIntent.ts
+- `src/components/glances/index.ts` — removed dead barrel exports

@@ -21,9 +21,18 @@ type Props = {
 
 export default function MessageList({ messages, streamingId, onSuggestionTap, isLoaded }: Props) {
   const flatListRef = useRef<FlatList>(null);
+  const isNearBottomRef = useRef(true);
+
+  const onScroll = useCallback((e: any) => {
+    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
+    isNearBottomRef.current = distanceFromBottom < 100;
+  }, []);
 
   const onContentSizeChange = useCallback(() => {
-    flatListRef.current?.scrollToEnd({ animated: true });
+    if (isNearBottomRef.current) {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }
   }, []);
 
   const renderItem = useCallback(({ item }: { item: Message }) => {
@@ -63,6 +72,8 @@ export default function MessageList({ messages, streamingId, onSuggestionTap, is
       renderItem={renderItem}
       contentContainerStyle={styles.list}
       onContentSizeChange={onContentSizeChange}
+      onScroll={onScroll}
+      scrollEventThrottle={16}
       showsVerticalScrollIndicator={false}
       ListEmptyComponent={
         <ConversationEmpty onSuggestionTap={onSuggestionTap} isLoaded={isLoaded} />

@@ -10,11 +10,12 @@ import {
   PlusJakartaSans_700Bold,
 } from '@expo-google-fonts/plus-jakarta-sans';
 import { NavigationBar } from 'expo-navigation-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider } from '../src/theme/ThemeContext';
 import { GlanceProvider } from '../src/components/glances';
 import { AmbientProvider, AmbientEventWiring, AmbientContextUpdater } from '../src/ambient';
 import { DesktopPresenceProvider } from '../src/desktop';
-import { useSettings } from '../src/stores/settingsStore';
+import { useSettings, isConfigured } from '../src/stores/settingsStore';
 import { LOCK_MODE_MS } from '../src/stores/settingsStore';
 import { useWs } from '../src/stores/wsStore';
 import { useAuth } from '../src/stores/authStore';
@@ -23,8 +24,6 @@ import LockScreen from '../src/components/LockScreen';
 import ConnectionBanner from '../src/components/ConnectionBanner';
 import AmbientBackground from '../src/components/AmbientBackground';
 import { colors } from '../src/theme';
-
-const PLACEHOLDER = 'http://100.100.100.100:8000';
 
 export default function RootLayout() {
   const [booted, setBooted] = useState(false);
@@ -87,14 +86,14 @@ export default function RootLayout() {
   // Redirect to setup if needed
   useEffect(() => {
     if (!isLoaded) return;
-    if (backendUrl === PLACEHOLDER && segments[0] !== 'setup') {
+    if (!isConfigured(backendUrl) && segments[0] !== 'setup') {
       router.replace('/setup');
     }
   }, [isLoaded, backendUrl]);
 
   // WebSocket
   useEffect(() => {
-    if (isLoaded && backendUrl && backendUrl !== PLACEHOLDER) {
+    if (isLoaded && isConfigured(backendUrl)) {
       wsConnect(backendUrl);
     }
     return () => { wsDisconnect(); };
@@ -112,8 +111,9 @@ export default function RootLayout() {
   const showContent = booted && !locked;
 
   return (
-    <ThemeProvider>
-      <View style={{ flex: 1, backgroundColor: colors.bgDeep }}>
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <View style={{ flex: 1, backgroundColor: colors.bgDeep }}>
         <StatusBar style="light" />
         <NavigationBar style="light" />
 
@@ -159,6 +159,7 @@ export default function RootLayout() {
           </AmbientProvider>
         )}
       </View>
-    </ThemeProvider>
+      </ThemeProvider>
+    </SafeAreaProvider>
   );
 }

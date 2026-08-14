@@ -1,12 +1,11 @@
-import { SafeAreaView, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../../src/theme';
-import GlanceHeader from '../../src/components/glances/GlanceHeader';
 import { DesktopGlance } from '../../src/components/glances/glances';
 
 export default function DesktopPage() {
   return (
     <SafeAreaView style={styles.container}>
-      <GlanceHeader icon="monitor" title="Desktop Status" subtitle="Live PC stats" />
       <DesktopGlance />
     </SafeAreaView>
   );

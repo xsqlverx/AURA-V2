@@ -22,7 +22,6 @@ export default function MediaGlance() {
   const [muted, setMuted] = useState(false);
   const [duration, setDurationState] = useState<number>(0);
   const [currentTime, setCurrentTime] = useState<number>(0);
-  const [seeking, setSeeking] = useState(false);
 
   const track = presence.media;
 
@@ -44,7 +43,12 @@ export default function MediaGlance() {
     try { await mediaControl(action, value); } catch {}
   }, []);
 
-  const handleVolumeChange = useCallback(async (val: number) => {
+  const handleVolumeChange = useCallback((val: number) => {
+    const rounded = Math.round(val);
+    setVolState(rounded);
+  }, []);
+
+  const handleVolumeCommit = useCallback(async (val: number) => {
     const rounded = Math.round(val);
     setVolState(rounded);
     try { await setVolume(rounded); } catch {}
@@ -105,26 +109,26 @@ export default function MediaGlance() {
               ) : null}
             </View>
 
-            <View style={styles.progressSection}>
-              <Slider
-                style={styles.progressSlider}
-                minimumValue={0}
-                maximumValue={1}
-                value={getProgress()}
-                onSlidingStart={() => setSeeking(true)}
-                onSlidingComplete={(v) => {
-                  setSeeking(false);
-                  send('seek', Math.round(v * duration));
-                }}
-                minimumTrackTintColor={accent.cyan}
-                maximumTrackTintColor="rgba(255,255,255,0.08)"
-                thumbTintColor={accent.cyan}
-              />
-              <View style={styles.timeRow}>
-                <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
-                <Text style={styles.timeText}>{formatTime(duration)}</Text>
+            {duration > 0 ? (
+              <View style={styles.progressSection}>
+                <Slider
+                  style={styles.progressSlider}
+                  minimumValue={0}
+                  maximumValue={1}
+                  value={getProgress()}
+                  onSlidingComplete={(v) => {
+                    send('seek', Math.round(v * duration));
+                  }}
+                  minimumTrackTintColor={accent.cyan}
+                  maximumTrackTintColor="rgba(255,255,255,0.08)"
+                  thumbTintColor={accent.cyan}
+                />
+                <View style={styles.timeRow}>
+                  <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
+                  <Text style={styles.timeText}>{formatTime(duration)}</Text>
+                </View>
               </View>
-            </View>
+            ) : null}
 
             <View style={styles.controlsRow}>
               <Pressable onPress={() => send('prev')} style={styles.ctrlBtn}>
@@ -166,6 +170,7 @@ export default function MediaGlance() {
               step={2}
               value={muted ? 0 : (volume ?? 50)}
               onValueChange={handleVolumeChange}
+              onSlidingComplete={handleVolumeCommit}
               minimumTrackTintColor={accent.cyan}
               maximumTrackTintColor="rgba(255,255,255,0.08)"
               thumbTintColor={accent.cyan}
@@ -326,8 +331,8 @@ const styles = StyleSheet.create({
     gap: spacing.space12,
   },
   muteBtn: {
-    width: 32,
-    height: 32,
+    width: 44,
+    height: 44,
     borderRadius: radius.sm,
     alignItems: 'center',
     justifyContent: 'center',

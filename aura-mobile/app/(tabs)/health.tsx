@@ -1,12 +1,11 @@
-import { SafeAreaView, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../../src/theme';
-import GlanceHeader from '../../src/components/glances/GlanceHeader';
 import { HealthGlance } from '../../src/components/glances/glances';
 
 export default function HealthPage() {
   return (
     <SafeAreaView style={styles.container}>
-      <GlanceHeader icon="heart" title="Health" subtitle="System status" />
       <HealthGlance />
     </SafeAreaView>
   );

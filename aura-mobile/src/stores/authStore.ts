@@ -43,7 +43,7 @@ export const useAuth = create<AuthState>((set, get) => ({
     const hash = await hashPin(pin);
     await setItemAsync(PIN_KEY, hash);
     await setItemAsync(LOCK_ENABLED_KEY, 'true');
-    set({ lockEnabled: true, pinSet: true, locked: true });
+    set({ lockEnabled: true, pinSet: true, locked: false });
     return true;
   },
 

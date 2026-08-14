@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
-import { View, Text, Pressable, StyleSheet, SafeAreaView, RefreshControl, ScrollView, Platform } from 'react-native';
+import { View, Text, Pressable, StyleSheet, RefreshControl, ScrollView, Platform } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from 'expo-router';
 import { useNavigation } from 'expo-router';
@@ -106,7 +107,7 @@ export default function StatsScreen() {
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={
-          <RefreshControl refreshing={loading && !stats} onRefresh={load} tintColor={colors.primary} colors={[colors.primary]} />
+          <RefreshControl refreshing={loading} onRefresh={load} tintColor={colors.primary} colors={[colors.primary]} />
         }
         showsVerticalScrollIndicator={false}
       >

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { View, Text, Pressable, StyleSheet, Platform } from 'react-native';
 import Animated, { FadeInDown, FadeOutUp } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
 import Icon from './Icon';
 import { glass, text, semantic, accent } from '../tokens/colors';
@@ -28,6 +29,7 @@ const TOAST_CONFIG: Record<ToastType, { icon: string; accent: string }> = {
 };
 
 export default function Toast({ message, detail, type = 'info', visible, onDismiss, autoDismiss = 3000 }: Props) {
+  const insets = useSafeAreaInsets();
   useEffect(() => {
     if (!visible) return;
     const t = setTimeout(onDismiss, autoDismiss);
@@ -41,7 +43,7 @@ export default function Toast({ message, detail, type = 'info', visible, onDismi
     <Animated.View
       entering={FadeInDown.duration(220).springify().damping(30).stiffness(420).withInitialValues({ translateY: 20 })}
       exiting={FadeOutUp.duration(duration.toastOut)}
-      style={styles.positioner}
+      style={[styles.positioner, { top: insets.top + 8 }]}
     >
       <Pressable onPress={onDismiss} style={styles.container}>
         {Platform.OS === 'ios' ? (
@@ -73,7 +75,6 @@ function ToastBody({ config, message, detail }: { config: { icon: string; accent
 const styles = StyleSheet.create({
   positioner: {
     position: 'absolute',
-    top: 60,
     left: spacing.space16,
     right: spacing.space16,
     zIndex: 200,

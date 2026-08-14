@@ -68,7 +68,6 @@ export class DesktopPresenceSync {
     this.syncAll();
     this.schedule('system_stats', 10000);
     this.schedule('media', 5000);
-    this.schedule('focus', 3000);
     this.schedule('health', 10000);
     this.schedule('network', 15000);
     this.schedule('battery', 30000);
@@ -100,7 +99,6 @@ export class DesktopPresenceSync {
     await Promise.all([
       this.sync('system_stats'),
       this.sync('media'),
-      this.sync('focus'),
       this.sync('health'),
       this.sync('network'),
     ]);
@@ -112,7 +110,6 @@ export class DesktopPresenceSync {
     switch (cap) {
       case 'system_stats': return this.syncSystemStats();
       case 'media': return this.syncMedia();
-      case 'focus': return this.syncFocus();
       case 'health': return this.syncHealth();
       case 'network': return this.syncNetwork();
       case 'battery': return this.syncBattery();
@@ -177,36 +174,25 @@ export class DesktopPresenceSync {
       lastUpdated: Date.now(),
     };
 
+    if (data.focus_app || data.foreground_app) {
+      const focus: FocusInfo = {
+        app: data.focus_app || data.foreground_app || 'Unknown',
+        window_title: data.window_title || '',
+      };
+      update.focus = focus;
+
+      if (!this.availableCaps.includes('focus')) {
+        this.availableCaps.push('focus');
+        update.capabilities = [...this.availableCaps];
+      }
+    }
+
     if (!this.availableCaps.includes('media')) {
       this.availableCaps.push('media');
       update.capabilities = [...this.availableCaps];
     }
 
     this.callback(update);
-  }
-
-  private async syncFocus(): Promise<void> {
-    const data = await fetchWithTimeout(() => getNowPlaying());
-    if (!data) return;
-
-    if (data.focus_app || data.foreground_app) {
-      const focus: FocusInfo = {
-        app: data.focus_app || data.foreground_app || 'Unknown',
-        window_title: data.window_title || '',
-      };
-
-      const update: SyncUpdate = {
-        focus,
-        lastUpdated: Date.now(),
-      };
-
-      if (!this.availableCaps.includes('focus')) {
-        this.availableCaps.push('focus');
-        update.capabilities = [...this.availableCaps];
-      }
-
-      this.callback(update);
-    }
   }
 
   private async syncHealth(): Promise<void> {
