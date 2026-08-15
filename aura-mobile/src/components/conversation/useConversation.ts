@@ -1,12 +1,14 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Keyboard, Alert, Platform } from 'react-native';
-import { chat as sendChatApi } from '../../api/aura';
+import { Keyboard, Alert } from 'react-native';
+import { routeMessage, extractToolCalls, cleanToolCallBlocks, executeToolCalls, DailyCapExceeded } from '../../api/chatRouter';
 import { useSettings } from '../../stores/settingsStore';
 import { useWs } from '../../stores/wsStore';
 import { extractHandoffs, executeHandoff, type HandoffAction } from '../../services/handoff';
+import { handleCommand } from '../../intents/engine';
+import { speak as localSpeak } from '../../services/tts';
 import type {
-  Message, ConversationPhase, ToolInfo, MemoryInfo, ProgressStage,
-  UserMessage, TextMessage, ToolMessage, MemoryMessage, ErrorMessage, ProgressMessage,
+  Message, ConversationPhase,
+  UserMessage, TextMessage, ToolMessage, ErrorMessage,
 } from './types';
 
 let ExpoSpeechRecognitionModule: any = null;
@@ -34,18 +36,17 @@ export function useConversation() {
   const streamBufferRef = useRef('');
   const pendingHandoffsRef = useRef<HandoffAction[]>([]);
   const abortRef = useRef<AbortController | null>(null);
+  const phaseRef = useRef(phase);
 
-  // Keep ref in sync
   useEffect(() => { messagesRef.current = messages; }, [messages]);
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
 
-  // Keyboard tracking
   useEffect(() => {
     const show = Keyboard.addListener('keyboardDidShow', (e) => setKbHeight(e.endCoordinates.height));
     const hide = Keyboard.addListener('keyboardDidHide', () => setKbHeight(0));
     return () => { show.remove(); hide.remove(); };
   }, []);
 
-  // Sync WebSocket state to conversation phase
   useEffect(() => {
     if (!wsConnected) { setPhase('idle'); return; }
     switch (wsState) {
@@ -57,7 +58,6 @@ export function useConversation() {
     }
   }, [wsState, wsConnected]);
 
-  // Speech recognition events
   useSpeechRecognitionEvent('result', (event: any) => {
     if (event.results?.[0]?.transcript) {
       setInputText((prev) => (prev ? prev + ' ' + event.results[0].transcript : event.results[0].transcript));
@@ -89,7 +89,7 @@ export function useConversation() {
   const sendMessage = useCallback(async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
-    if (phase === 'processing' || phase === 'streaming' || phase === 'executing_tool') return;
+    if (phaseRef.current === 'processing' || phaseRef.current === 'streaming' || phaseRef.current === 'executing_tool') return;
 
     const userMsg: UserMessage = {
       id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -112,7 +112,23 @@ export function useConversation() {
     setPhase('processing');
     setStreamingId(responseId);
 
-    // Simulate processing phases based on content keywords
+    // ── Pre-brain intent engine: zero-token command layer ──────
+    try {
+      const command = await handleCommand(trimmed);
+      if (command) {
+        setPhase('executing_tool');
+        updateMessage(responseId, (msg) => {
+          if (msg.type === 'text') return { ...msg, content: command.replyText, isStreaming: false };
+          return msg;
+        });
+        void localSpeak(command.spokenText || command.replyText);
+        setPhase('idle');
+        return;
+      }
+    } catch (intentErr) {
+      console.warn('[IntentEngine] failed, falling through to brain:', intentErr);
+    }
+
     const toolKeywords = ['open', 'launch', 'start', 'run', 'kill', 'stop', 'play', 'pause', 'volume', 'copy', 'paste', 'shutdown', 'restart', 'lock', 'sleep'];
     const needsTool = toolKeywords.some((kw) => trimmed.toLowerCase().includes(kw));
 
@@ -126,9 +142,6 @@ export function useConversation() {
           tool: { name: 'executing command', status: 'running', detail: trimmed },
         };
         setMessages((prev) => [...prev, toolMsg]);
-      } else {
-        setPhase('searching_memory');
-        await new Promise((r) => setTimeout(r, 300));
       }
 
       setPhase('generating');
@@ -141,26 +154,60 @@ export function useConversation() {
           content: (m as any).content || '',
         }));
 
-      setPhase('streaming');
       streamBufferRef.current = '';
       pendingHandoffsRef.current = [];
       abortRef.current = new AbortController();
-      await sendChatApi(trimmed, history, 'deep', (chunk) => {
-        streamBufferRef.current += chunk;
-        const { clean, actions } = extractHandoffs(streamBufferRef.current);
-        if (actions.length) pendingHandoffsRef.current.push(...actions);
-        updateMessage(responseId, (msg) => {
-          if (msg.type === 'text') {
-            return { ...msg, content: clean };
-          }
-          return msg;
-        });
-      }, abortRef.current.signal);
+
+      const { localBrainMode } = useSettings.getState();
+
+      if (localBrainMode) {
+        const result = await routeMessage(trimmed, history, (text) => {
+          if (streamBufferRef.current === '' && text) setPhase('streaming');
+          streamBufferRef.current = text;
+          updateMessage(responseId, (msg) => {
+            if (msg.type === 'text') return { ...msg, content: text };
+            return msg;
+          });
+        }, abortRef.current.signal);
+
+        if (result.toolCalls.length) {
+          setPhase('executing_tool');
+          await executeToolCalls(result.toolCalls);
+        }
+      } else {
+        await routeMessage(trimmed, history, (chunk) => {
+          if (streamBufferRef.current === '' && chunk) setPhase('streaming');
+          streamBufferRef.current += chunk;
+          const { clean, actions } = extractHandoffs(streamBufferRef.current);
+          if (actions.length) pendingHandoffsRef.current.push(...actions);
+          updateMessage(responseId, (msg) => {
+            if (msg.type === 'text') return { ...msg, content: clean };
+            return msg;
+          });
+        }, abortRef.current.signal);
+      }
+
       for (const action of pendingHandoffsRef.current) {
         await executeHandoff(action);
       }
     } catch (e: any) {
-      if (e?.name === 'AbortError' || abortRef.current?.signal.aborted) {
+      if (e?.name === 'AbortError') {
+        if (abortRef.current) {
+          const errMsg: ErrorMessage = {
+            id: `err-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            type: 'error',
+            content: 'The brain took too long to respond. Try again, or switch to the PC brain.',
+            timestamp: Date.now(),
+          };
+          setMessages((prev) => [...prev, errMsg]);
+        }
+        return;
+      }
+      if (e instanceof DailyCapExceeded) {
+        Alert.alert('Brain daily limit reached', 'Aura\u2019s free brain hit its 50 requests/day cap. Switch to the PC brain?', [
+          { text: 'Dismiss', style: 'cancel' },
+          { text: 'Switch to PC', onPress: () => useSettings.getState().setLocalBrainMode(false) },
+        ]);
         return;
       }
       const errMsg: ErrorMessage = {
@@ -205,7 +252,6 @@ export function useConversation() {
       }
       await ExpoSpeechRecognitionModule.start({ lang: 'en-US' });
       if (stopRequestedRef.current) {
-        // User released before start() resolved — stop immediately
         startedRef.current = false;
         startingRef.current = false;
         setIsRecording(false);
@@ -227,7 +273,6 @@ export function useConversation() {
   const stopRecording = useCallback(() => {
     if (!ExpoSpeechRecognitionModule) return;
     if (startingRef.current) {
-      // Start still pending — mark it so start() aborts when it resolves
       stopRequestedRef.current = true;
       setIsRecording(false);
       return;

@@ -11,10 +11,14 @@ import MessageList from './MessageList';
 import InputBar from './InputBar';
 import ConversationAmbient from './ConversationAmbient';
 import ContextPanel from './ContextPanel';
+import { useSettings } from '../../stores/settingsStore';
 
 export default function ConversationScreen() {
   const router = useRouter();
   const [contextOpen, setContextOpen] = useState(false);
+  const localBrainMode = useSettings((s) => s.localBrainMode);
+  const setLocalBrainMode = useSettings((s) => s.setLocalBrainMode);
+  const llmApiKey = useSettings((s) => s.llmApiKey);
   const {
     messages, phase, streamingId, isRecording, inputText,
     setInputText, kbHeight, isLoaded,
@@ -39,9 +43,23 @@ export default function ConversationScreen() {
       <ConversationAmbient phase={phase} />
 
       <View style={styles.header}>
-        <Pressable onPress={() => router.push('/(tabs)/settings')} style={styles.headerBtn}>
-          <Icon name="settings" size={iconSize.action} color={text.secondary} />
-        </Pressable>
+        <View style={styles.headerLeft}>
+          <Pressable onPress={() => router.push('/(tabs)/settings')} style={styles.headerBtn}>
+            <Icon name="settings" size={iconSize.action} color={text.secondary} />
+          </Pressable>
+          {llmApiKey ? (
+            <Pressable
+              onPress={() => setLocalBrainMode(!localBrainMode)}
+              style={[styles.headerBtn, localBrainMode && styles.brainBtnActive]}
+            >
+              <Icon
+                name={localBrainMode ? 'psychology' : 'cloud'}
+                size={iconSize.action}
+                color={localBrainMode ? accent.cyan : text.secondary}
+              />
+            </Pressable>
+          ) : null}
+        </View>
         <View style={styles.headerRight}>
           <Pressable onPress={clearMessages} style={styles.headerBtn}>
             <Icon name="add" size={iconSize.action} color={text.secondary} />
@@ -87,12 +105,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.space12,
     paddingVertical: spacing.space8,
   },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.space4,
+  },
   headerBtn: {
     width: 36,
     height: 36,
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  brainBtnActive: {
+    backgroundColor: `${accent.cyan}18`,
   },
   headerBtnActive: {
     backgroundColor: `${accent.cyan}12`,

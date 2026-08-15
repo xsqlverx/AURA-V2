@@ -14,6 +14,8 @@ const KEYS = {
   llmApiKey: 'aura_llm_api_key',
   llmProvider: 'aura_llm_provider',
   llmModel: 'aura_llm_model',
+  voiceEnabled: 'aura_voice_enabled',
+  ambientSpeakEnabled: 'aura_ambient_speak',
 };
 
 export type LockMode = 'exit' | '30s' | '60s' | '120s' | '300s';
@@ -34,17 +36,22 @@ export const LOCK_MODE_LABELS: Record<LockMode, string> = {
   '300s': '5 min',
 };
 
-export const LLM_PROVIDERS = [
-  { id: 'openrouter', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1/chat/completions' },
-  { id: 'groq', label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1/chat/completions' },
+export const FREE_OPENROUTER_MODELS = [
+  { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', label: 'Nemotron 3 Ultra', context: '1M', desc: 'Best free — deep reasoning, orchestration' },
+  { id: 'google/gemma-4-31b-it:free', label: 'Gemma 4 31B', context: '262K', desc: 'Google — vision + tools, multilingual' },
+  { id: 'meta-llama/llama-3.3-70b-instruct:free', label: 'Llama 3.3 70B', context: '131K', desc: 'Meta — reliable, multilingual chat' },
+  { id: 'openrouter/free', label: 'Auto (Router picks)', context: 'Varies', desc: 'Auto-routes to best available free model' },
+  { id: 'cohere/north-mini-code:free', label: 'North Mini Code', context: '256K', desc: 'Cohere — coding & agentic tasks' },
+  { id: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', label: 'Nemotron Nano Omni', context: '256K', desc: 'NVIDIA — multimodal (text+image+audio)' },
+  { id: 'nvidia/nemotron-3.5-lightning:free', label: 'Nemotron 3.5 Lightning', context: '1M', desc: 'NVIDIA — fast, long-context' },
+  { id: 'inclusionai/ling-3.0-flash:free', label: 'Ling 3.0 Flash', context: '262K', desc: 'InclusionAI — fast general tasks' },
 ] as const;
 
-export const DEFAULT_LLM_MODEL: Record<string, string> = {
-  openrouter: 'meta-llama/llama-3.1-8b-instruct',
-  groq: 'llama-3.3-70b-versatile',
-};
+export const DEFAULT_LLM_MODEL = FREE_OPENROUTER_MODELS[0].id;
 
-export type LlmProviderId = (typeof LLM_PROVIDERS)[number]['id'];
+export const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1/chat/completions';
+
+export type LlmProviderId = 'openrouter';
 
 type SettingsState = {
   backendUrl: string;
@@ -53,11 +60,17 @@ type SettingsState = {
   llmApiKey: string;
   llmProvider: LlmProviderId;
   llmModel: string;
+  localBrainMode: boolean;
+  voiceEnabled: boolean;
+  ambientSpeakEnabled: boolean;
   isLoaded: boolean;
   load: () => Promise<void>;
   save: (backendUrl: string, apiKey: string) => Promise<void>;
   setLockMode: (mode: LockMode) => Promise<void>;
   saveLlm: (apiKey: string, provider: LlmProviderId, model: string) => Promise<void>;
+  setLocalBrainMode: (on: boolean) => void;
+  setVoiceEnabled: (on: boolean) => Promise<void>;
+  setAmbientSpeakEnabled: (on: boolean) => Promise<void>;
 };
 
 export const useSettings = create<SettingsState>((set) => ({
@@ -66,7 +79,10 @@ export const useSettings = create<SettingsState>((set) => ({
   lockMode: 'exit',
   llmApiKey: '',
   llmProvider: 'openrouter',
-  llmModel: DEFAULT_LLM_MODEL.openrouter,
+  llmModel: DEFAULT_LLM_MODEL,
+  localBrainMode: false,
+  voiceEnabled: true,
+  ambientSpeakEnabled: true,
   isLoaded: false,
   load: async () => {
     try {
@@ -75,9 +91,11 @@ export const useSettings = create<SettingsState>((set) => ({
       const lockMode = ((await getItemAsync(KEYS.lockMode)) as LockMode) || 'exit';
       const llmApiKey = (await getItemAsync(KEYS.llmApiKey)) || '';
       const llmProvider = ((await getItemAsync(KEYS.llmProvider)) as LlmProviderId) || 'openrouter';
-      const llmModel = (await getItemAsync(KEYS.llmModel)) || DEFAULT_LLM_MODEL[llmProvider];
+      const llmModel = (await getItemAsync(KEYS.llmModel)) || DEFAULT_LLM_MODEL;
+      const voiceEnabled = (await getItemAsync(KEYS.voiceEnabled)) !== 'off';
+      const ambientSpeakEnabled = (await getItemAsync(KEYS.ambientSpeakEnabled)) !== 'off';
       configureApi(url, key);
-      set({ backendUrl: url, apiKey: key, lockMode, llmApiKey, llmProvider, llmModel, isLoaded: true });
+      set({ backendUrl: url, apiKey: key, lockMode, llmApiKey, llmProvider, llmModel, voiceEnabled, ambientSpeakEnabled, isLoaded: true });
     } catch {
       set({ isLoaded: true });
     }
@@ -97,5 +115,14 @@ export const useSettings = create<SettingsState>((set) => ({
     await setItemAsync(KEYS.llmProvider, provider);
     await setItemAsync(KEYS.llmModel, model);
     set({ llmApiKey: apiKey, llmProvider: provider, llmModel: model });
+  },
+  setLocalBrainMode: (on: boolean) => set({ localBrainMode: on }),
+  setVoiceEnabled: async (on: boolean) => {
+    await setItemAsync(KEYS.voiceEnabled, on ? 'on' : 'off');
+    set({ voiceEnabled: on });
+  },
+  setAmbientSpeakEnabled: async (on: boolean) => {
+    await setItemAsync(KEYS.ambientSpeakEnabled, on ? 'on' : 'off');
+    set({ ambientSpeakEnabled: on });
   },
 }));

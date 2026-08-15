@@ -12,7 +12,7 @@ export function configure(baseUrl: string, apiKey: string) {
 export function getBaseUrl() { return _baseUrl; }
 export function getApiKey() { return _apiKey; }
 
-const DEFAULT_TIMEOUT_MS = 8000;
+const DEFAULT_TIMEOUT_MS = 15000;
 
 async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -80,6 +80,35 @@ export async function chat(
     onChunk(chunk);
   }
   return full;
+}
+
+// ── Tasks ─────────────────────────────────────────────────────────────
+
+export async function getTasks(date?: string) {
+  const qs = date ? `?date=${encodeURIComponent(date)}` : '';
+  const res = await request(`/tasks${qs}`);
+  return res.json() as Promise<{ tasks: { id: string; name: string; category?: string; color?: string; time?: string; date?: string; done?: boolean }[] }>;
+}
+
+export async function createTask(task: { name: string; category?: string; color?: string; time?: string; date?: string; done?: boolean }) {
+  const res = await request('/tasks', {
+    method: 'POST',
+    body: JSON.stringify(task),
+  });
+  return res.json();
+}
+
+export async function updateTask(taskId: string, patch: { name?: string; done?: boolean; time?: string; date?: string }) {
+  const res = await request(`/tasks/${taskId}`, {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  });
+  return res.json();
+}
+
+export async function deleteTask(taskId: string) {
+  const res = await request(`/tasks/${taskId}`, { method: 'DELETE' });
+  return res.json();
 }
 
 // ── Health ───────────────────────────────────────────────────────────

@@ -8,8 +8,9 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useSettings } from '../../src/stores/settingsStore';
 import { isConfigured } from '../../src/stores/settingsStore';
 import { LOCK_MODE_LABELS, LockMode } from '../../src/stores/settingsStore';
-import { LLM_PROVIDERS, DEFAULT_LLM_MODEL, LlmProviderId } from '../../src/stores/settingsStore';
+import { FREE_OPENROUTER_MODELS } from '../../src/stores/settingsStore';
 import { getHealth } from '../../src/api/aura';
+import { isVoiceModelReady, ensureVoiceModel } from '../../src/services/tts';
 import { colors, spacing, radius, typography } from '../../src/theme';
 import GlassCard from '../../src/components/GlassCard';
 import GlassButton from '../../src/components/GlassButton';
@@ -20,23 +21,50 @@ const LOCK_MODES: LockMode[] = ['exit', '30s', '60s', '120s', '300s'];
 export default function SettingsScreen() {
   const router = useRouter();
   const navigation = useNavigation<DrawerNavigationProp<{}>>();
-  const { backendUrl, apiKey, lockMode, llmApiKey, llmProvider, llmModel, save, setLockMode, saveLlm } = useSettings();
+  const { backendUrl, apiKey, lockMode, llmApiKey, llmProvider, llmModel, voiceEnabled, ambientSpeakEnabled, save, setLockMode, saveLlm, setVoiceEnabled, setAmbientSpeakEnabled } = useSettings();
   const [url, setUrl] = useState('');
   const [key, setKey] = useState('');
   const [llmKey, setLlmKey] = useState('');
-  const [llmProviderId, setLlmProviderId] = useState<LlmProviderId>('openrouter');
-  const [llmModelName, setLlmModelName] = useState('');
+  const [llmModelId, setLlmModelId] = useState<string>(FREE_OPENROUTER_MODELS[0].id);
+  const [showModelPicker, setShowModelPicker] = useState(false);
   const [testing, setTesting] = useState(false);
   const [status, setStatus] = useState<'idle' | 'ok' | 'err'>('idle');
   const [statusMsg, setStatusMsg] = useState('');
+  const [voiceState, setVoiceState] = useState<'unknown' | 'ready' | 'downloading' | 'error'>('unknown');
+  const [voicePercent, setVoicePercent] = useState(0);
+  const [voiceWorking, setVoiceWorking] = useState(false);
 
   useEffect(() => {
     setUrl(backendUrl);
     setKey(apiKey);
     setLlmKey(llmApiKey);
-    setLlmProviderId(llmProvider);
-    setLlmModelName(llmModel);
-  }, [backendUrl, apiKey, llmApiKey, llmProvider, llmModel]);
+    setLlmModelId(llmModel || FREE_OPENROUTER_MODELS[0].id);
+  }, [backendUrl, apiKey, llmApiKey, llmModel]);
+
+  useEffect(() => {
+    let active = true;
+    isVoiceModelReady().then((ready) => {
+      if (active) setVoiceState(ready ? 'ready' : 'unknown');
+    }).catch(() => {
+      if (active) setVoiceState('error');
+    });
+    return () => { active = false; };
+  }, []);
+
+  const handleDownloadVoice = async () => {
+    if (voiceWorking) return;
+    setVoiceWorking(true);
+    setVoiceState('downloading');
+    setVoicePercent(0);
+    try {
+      await ensureVoiceModel((percent) => setVoicePercent(Math.round(percent)));
+      setVoiceState('ready');
+    } catch {
+      setVoiceState('error');
+    } finally {
+      setVoiceWorking(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!url.trim()) { Alert.alert('Error', 'Backend URL is required'); return; }
@@ -67,11 +95,9 @@ export default function SettingsScreen() {
   };
 
   const handleSaveLlm = async () => {
-    if (!llmKey.trim()) { Alert.alert('Error', 'LLM API key is required'); return; }
-    const providerId = LLM_PROVIDERS.some((p) => p.id === llmProviderId) ? llmProviderId : 'openrouter';
-    const model = llmModelName.trim() || DEFAULT_LLM_MODEL[providerId];
-    await saveLlm(llmKey.trim(), providerId, model);
-    Alert.alert('Saved', 'Independent brain configured');
+    if (!llmKey.trim()) { Alert.alert('Error', 'OpenRouter API key is required'); return; }
+    await saveLlm(llmKey.trim(), 'openrouter', llmModelId);
+    Alert.alert('Saved', 'Local brain configured — tap the brain icon in chat to activate');
   };
 
   const isConfiguredFlag = isConfigured(backendUrl);
@@ -170,58 +196,28 @@ export default function SettingsScreen() {
         <GlassCard>
           <View style={styles.lockSectionHeader}>
             <MaterialIcons name="memory" size={16} color={colors.primary} />
-            <Text style={styles.lockSectionLabel}>OFFLINE LLM (PC OFF)</Text>
+            <Text style={styles.lockSectionLabel}>LOCAL LLM (PC OFF)</Text>
           </View>
           <Text style={styles.lockHint}>
-            Add your own LLM API key so AURA can reply without your PC running. Uses your on-phone memory mirror for context.
+            Chat with AURA using free OpenRouter models — no PC needed. Uses your on-phone memory mirror for context.
           </Text>
 
           <View style={styles.field}>
             <View style={styles.labelRow}>
-              <MaterialIcons name="storage" size={14} color={colors.onSurfaceMuted} />
-              <Text style={styles.label}>Provider</Text>
-            </View>
-            <View style={styles.providerChips}>
-              {LLM_PROVIDERS.map((p) => {
-                const active = llmProviderId === p.id;
-                return (
-                  <Pressable
-                    key={p.id}
-                    onPress={() => {
-                      setLlmProviderId(p.id);
-                      if (!llmModelName.trim()) setLlmModelName(DEFAULT_LLM_MODEL[p.id]);
-                    }}
-                    style={({ pressed }) => [
-                      styles.lockChip,
-                      active && styles.lockChipActive,
-                      pressed && { opacity: 0.8 },
-                    ]}
-                  >
-                    <Text style={[styles.lockChipText, active && styles.lockChipTextActive]}>
-                      {p.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
-
-          <View style={styles.field}>
-            <View style={styles.labelRow}>
               <MaterialIcons name="key" size={14} color={colors.onSurfaceMuted} />
-              <Text style={styles.label}>LLM API Key</Text>
+              <Text style={styles.label}>OpenRouter API Key</Text>
             </View>
             <GlassInput
               style={styles.input}
               value={llmKey}
               onChangeText={setLlmKey}
-              placeholder="sk-..."
+              placeholder="sk-or-..."
               autoCapitalize="none"
               autoCorrect={false}
               secureTextEntry
             />
             <Text style={styles.hint}>
-              OpenRouter or Groq key. Only stored on this device.
+              Free at openrouter.ai — no credit card needed
             </Text>
           </View>
 
@@ -230,20 +226,128 @@ export default function SettingsScreen() {
               <MaterialIcons name="smart-toy" size={14} color={colors.onSurfaceMuted} />
               <Text style={styles.label}>Model</Text>
             </View>
-            <GlassInput
-              style={styles.input}
-              value={llmModelName}
-              onChangeText={setLlmModelName}
-              placeholder={DEFAULT_LLM_MODEL[llmProviderId]}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
+            <Pressable
+              onPress={() => setShowModelPicker(!showModelPicker)}
+              style={({ pressed }) => [styles.modelSelector, pressed && { opacity: 0.8 }]}
+            >
+              <Text style={styles.modelSelectorText}>
+                {FREE_OPENROUTER_MODELS.find((m) => m.id === llmModelId)?.label || 'Select model'}
+              </Text>
+              <MaterialIcons name={showModelPicker ? 'expand-less' : 'expand-more'} size={18} color={colors.onSurfaceMuted} />
+            </Pressable>
+            {showModelPicker ? (
+              <View style={styles.modelPickerDropdown}>
+                {FREE_OPENROUTER_MODELS.map((m) => {
+                  const active = m.id === llmModelId;
+                  return (
+                    <Pressable
+                      key={m.id}
+                      onPress={() => { setLlmModelId(m.id); setShowModelPicker(false); }}
+                      style={({ pressed }) => [
+                        styles.modelOption,
+                        active && styles.modelOptionActive,
+                        pressed && { opacity: 0.7 },
+                      ]}
+                    >
+                      <View style={styles.modelOptionLeft}>
+                        <Text style={[styles.modelOptionLabel, active && styles.modelOptionLabelActive]}>
+                          {m.label}
+                        </Text>
+                        <Text style={styles.modelOptionContext}>{m.context}</Text>
+                      </View>
+                      <Text style={styles.modelOptionDesc}>{m.desc}</Text>
+                      {active && <MaterialIcons name="check" size={16} color={colors.primary} />}
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
           </View>
 
           <View style={styles.buttons}>
             <GlassButton variant="primary" onPress={handleSaveLlm}>
               Save Brain
             </GlassButton>
+          </View>
+        </GlassCard>
+
+        <View style={styles.sectionHeader}>
+          <MaterialIcons name="record-voice-over" size={16} color={colors.primary} />
+          <Text style={styles.sectionLabel}>VOICE</Text>
+        </View>
+        <GlassCard>
+          <View style={styles.lockSectionHeader}>
+            <MaterialIcons name="graphic-eq" size={16} color={colors.primary} />
+            <Text style={styles.lockSectionLabel}>ON-DEVICE TTS</Text>
+          </View>
+          <Text style={styles.lockHint}>
+            AURA speaks confirmations on the phone itself using the same Supertonic voice as the PC — works even with the PC off.
+          </Text>
+          <View style={styles.lockChips}>
+            {[{ v: true, label: 'On' }, { v: false, label: 'Off' }].map((opt) => {
+              const active = voiceEnabled === opt.v;
+              return (
+                <Pressable
+                  key={String(opt.v)}
+                  onPress={() => setVoiceEnabled(opt.v)}
+                  style={({ pressed }) => [
+                    styles.lockChip,
+                    active && styles.lockChipActive,
+                    pressed && { opacity: 0.8 },
+                  ]}
+                >
+                  <Text style={[styles.lockChipText, active && styles.lockChipTextActive]}>{opt.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={styles.lockHint}>
+            {voiceState === 'ready'
+              ? 'Voice model ready.'
+              : voiceState === 'downloading'
+                ? `Downloading voice model... ${voicePercent}%`
+                : voiceState === 'error'
+                  ? 'Download failed. Check your connection and retry.'
+                  : 'Voice model not downloaded yet.'}
+          </Text>
+          {voiceState !== 'ready' && (
+            <View style={styles.buttons}>
+              <GlassButton variant="secondary" onPress={handleDownloadVoice} disabled={voiceWorking}>
+                {voiceWorking ? 'Downloading...' : 'Download voice model'}
+              </GlassButton>
+            </View>
+          )}
+        </GlassCard>
+
+        <View style={styles.sectionHeader}>
+          <MaterialIcons name="hearing" size={16} color={colors.primary} />
+          <Text style={styles.sectionLabel}>AMBIENT</Text>
+        </View>
+        <GlassCard>
+          <View style={styles.lockSectionHeader}>
+            <MaterialIcons name="volume-up" size={16} color={colors.primary} />
+            <Text style={styles.lockSectionLabel}>SPEAK EVENTS</Text>
+          </View>
+          <Text style={styles.lockHint}>
+            Aura speaks PC events aloud: connection changes, CPU spikes, low battery, media changes.
+          </Text>
+          <View style={styles.lockChips}>
+            {[{ v: true, label: 'On' }, { v: false, label: 'Off' }].map((opt) => {
+              const active = ambientSpeakEnabled === opt.v;
+              return (
+                <Pressable
+                  key={`ambient-${String(opt.v)}`}
+                  onPress={() => setAmbientSpeakEnabled(opt.v)}
+                  style={({ pressed }) => [
+                    styles.lockChip,
+                    active && styles.lockChipActive,
+                    pressed && { opacity: 0.8 },
+                  ]}
+                >
+                  <Text style={[styles.lockChipText, active && styles.lockChipTextActive]}>{opt.label}</Text>
+                </Pressable>
+              );
+            })}
           </View>
         </GlassCard>
 
@@ -356,4 +460,26 @@ const styles = StyleSheet.create({
   lockChipText: { ...typography.labelSm, color: colors.onSurface },
   lockChipTextActive: { color: colors.primary, fontWeight: '700' },
   lockHint: { ...typography.labelSm, color: colors.onSurfaceMuted, marginTop: spacing.sm, lineHeight: 16 },
+  modelSelector: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2,
+    borderRadius: radius.input, borderWidth: 1, borderColor: colors.glassBorder,
+    backgroundColor: colors.glassBg,
+  },
+  modelSelectorText: { ...typography.bodyMd, color: colors.onSurface, flex: 1 },
+  modelPickerDropdown: {
+    borderRadius: radius.card, borderWidth: 1, borderColor: colors.glassBorder,
+    backgroundColor: colors.glassBg, marginTop: spacing.xs, overflow: 'hidden',
+  },
+  modelOption: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2,
+    borderBottomWidth: 1, borderBottomColor: colors.glassBorder,
+  },
+  modelOptionActive: { backgroundColor: colors.primary + '12' },
+  modelOptionLeft: { flex: 1, marginRight: spacing.sm },
+  modelOptionLabel: { ...typography.bodyMd, color: colors.onSurface, fontWeight: '500' },
+  modelOptionLabelActive: { color: colors.primary },
+  modelOptionContext: { ...typography.labelSm, color: colors.onSurfaceMuted, marginTop: 1 },
+  modelOptionDesc: { ...typography.labelSm, color: colors.onSurfaceMuted, flexShrink: 1, maxWidth: 140 },
 });

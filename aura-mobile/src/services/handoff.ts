@@ -1,5 +1,6 @@
 import { Share, Linking, Alert, Platform } from 'react-native';
 import * as IntentLauncher from 'expo-intent-launcher';
+import { speakConfirmation } from './tts';
 
 const MARKER_RE = /<handoff_android>([\s\S]*?)<\/handoff_android>/g;
 
@@ -34,16 +35,19 @@ export async function executeHandoff(action: HandoffAction): Promise<{ ok: boole
         });
         if (!phone) throw new Error('No phone number provided');
         await Linking.openURL(url!);
+        speakConfirmation('send_sms');
         return { ok: true, label: `SMS to ${phone}` };
       }
       case 'open_app': {
         const pkg = action.app_package || '';
         if (!pkg) throw new Error('No app package provided');
         await IntentLauncher.openApplication(pkg);
+        speakConfirmation('open_app');
         return { ok: true, label: `Opened ${pkg}` };
       }
       case 'share_sheet': {
         const result = await Share.share({ message: action.text || '' });
+        if (result.action === Share.sharedAction) speakConfirmation('share_sheet');
         return {
           ok: result.action === Share.sharedAction,
           label: result.action === Share.sharedAction ? 'Shared' : 'Share cancelled',

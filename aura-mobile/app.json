@@ -26,15 +26,16 @@
         "android.permission.USE_BIOMETRIC",
         "android.permission.USE_FINGERPRINT",
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.POST_NOTIFICATIONS"
       ]
     },
     "plugins": [
       "expo-router",
+      "expo-notifications",
       "expo-secure-store",
       "expo-audio",
       "expo-local-authentication",
-      "expo-dev-client",
       [
         "expo-build-properties",
         {

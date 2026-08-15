@@ -15,6 +15,7 @@ export default function ConnectionBanner() {
   const failed = useWs((s) => s.failed);
   const everConnected = useWs((s) => s.everConnected);
   const isLoaded = useSettings((s) => s.isLoaded);
+  const localBrainMode = useSettings((s) => s.localBrainMode);
   const insets = useSafeAreaInsets();
   const opacity = useSharedValue(1);
 
@@ -32,7 +33,7 @@ export default function ConnectionBanner() {
 
   const animStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
 
-  if (!isLoaded || connected || (!failed && !everConnected)) return null;
+  if (!isLoaded || localBrainMode || connected || (!failed && !everConnected)) return null;
 
   return (
     <Animated.View

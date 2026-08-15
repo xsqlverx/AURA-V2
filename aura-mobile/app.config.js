@@ -1,0 +1,80 @@
+const isDevBuild = process.env.EAS_BUILD_PROFILE === 'development';
+
+module.exports = {
+  expo: {
+    name: 'Aura',
+    slug: 'aura-mobile',
+    version: '1.0.0',
+    orientation: 'portrait',
+    icon: './assets/images/icon.png',
+    scheme: 'aura',
+    userInterfaceStyle: 'dark',
+    backgroundColor: '#050505',
+    ios: {
+      supportsTablet: true,
+      bundleIdentifier: 'com.aura.mobile',
+    },
+    android: {
+      package: 'com.aura.mobile',
+      adaptiveIcon: {
+        backgroundColor: '#030508',
+        foregroundImage: './assets/images/android-icon-foreground.png',
+      },
+      permissions: [
+        'android.permission.RECORD_AUDIO',
+        'android.permission.MODIFY_AUDIO_SETTINGS',
+        'android.permission.FOREGROUND_SERVICE',
+        'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK',
+        'android.permission.USE_BIOMETRIC',
+        'android.permission.USE_FINGERPRINT',
+        'android.permission.ACCESS_COARSE_LOCATION',
+        'android.permission.ACCESS_FINE_LOCATION',
+        'android.permission.POST_NOTIFICATIONS',
+      ],
+    },
+    plugins: [
+      'expo-router',
+      'expo-notifications',
+      'expo-secure-store',
+      'expo-audio',
+      'expo-local-authentication',
+      ...(isDevBuild ? ['expo-dev-client'] : []),
+      [
+        'expo-build-properties',
+        {
+          android: {
+            usesCleartextTraffic: true,
+          },
+        },
+      ],
+      'expo-navigation-bar',
+      'expo-speech-recognition',
+      'expo-font',
+      'expo-splash-screen',
+      'expo-status-bar',
+      'expo-web-browser',
+      'expo-asset',
+      [
+        'expo-location',
+        {
+          locationWhenInUsePermission: 'Allow AURA to access your location for accurate weather.',
+          locationAlwaysAndWhenInUsePermission: 'Allow AURA to access your location for accurate weather.',
+        },
+      ],
+    ],
+    splash: {
+      image: './assets/images/icon.png',
+      resizeMode: 'contain',
+      backgroundColor: '#050505',
+    },
+    experiments: {
+      typedRoutes: true,
+    },
+    extra: {
+      router: {},
+      eas: {
+        projectId: '6510edf5-8485-4b98-b11c-100a1b7dc170',
+      },
+    },
+  },
+};

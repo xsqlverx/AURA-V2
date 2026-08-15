@@ -23,6 +23,7 @@ import BootSequence from '../src/components/BootSequence';
 import LockScreen from '../src/components/LockScreen';
 import ConnectionBanner from '../src/components/ConnectionBanner';
 import AmbientBackground from '../src/components/AmbientBackground';
+import ErrorBoundary from '../src/components/ErrorBoundary';
 import { colors } from '../src/theme';
 
 export default function RootLayout() {
@@ -111,55 +112,57 @@ export default function RootLayout() {
   const showContent = booted && !locked;
 
   return (
-    <SafeAreaProvider>
-      <ThemeProvider>
-        <View style={{ flex: 1, backgroundColor: colors.bgDeep }}>
-        <StatusBar style="light" />
-        <NavigationBar style="light" />
+    <ErrorBoundary>
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <View style={{ flex: 1, backgroundColor: colors.bgDeep }}>
+          <StatusBar style="light" />
+          <NavigationBar style="light" />
 
-        {/* Screen-level ambient lighting */}
-        <AmbientBackground />
+          {/* Screen-level ambient lighting */}
+          <AmbientBackground />
 
-        {/* Boot sequence overlay */}
-        {!booted && <BootSequence onComplete={() => setBooted(true)} />}
+          {/* Boot sequence overlay */}
+          {!booted && <BootSequence onComplete={() => setBooted(true)} />}
 
-        {/* Auth lock overlay */}
-        {booted && locked && <LockScreen />}
+          {/* Auth lock overlay */}
+          {booted && locked && <LockScreen />}
 
-        {/* Connection status banner — flashing red when backend unreachable */}
-        {showContent && <ConnectionBanner />}
+          {/* Connection status banner — flashing red when backend unreachable */}
+          {showContent && <ConnectionBanner />}
 
-        {/* Main app */}
-        {showContent && (
-          <AmbientProvider>
-            <DesktopPresenceProvider>
-            <GlanceProvider>
-              <AmbientContextUpdater />
-              <AmbientEventWiring />
-              <Stack
-              screenOptions={{
-                headerStyle: { backgroundColor: 'transparent' },
-                headerTintColor: colors.primary,
-                headerTitleStyle: { fontWeight: '600' },
-                contentStyle: { backgroundColor: 'transparent' },
-              }}
-            >
-              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-              <Stack.Screen
-                name="security"
-                options={{ title: 'Security' }}
-              />
-              <Stack.Screen
-                name="setup"
-                options={{ headerShown: false, presentation: 'fullScreenModal' }}
-              />
-            </Stack>
-          </GlanceProvider>
-            </DesktopPresenceProvider>
-          </AmbientProvider>
-        )}
-      </View>
-      </ThemeProvider>
-    </SafeAreaProvider>
+          {/* Main app */}
+          {showContent && (
+            <AmbientProvider>
+              <DesktopPresenceProvider>
+              <GlanceProvider>
+                <AmbientContextUpdater />
+                <AmbientEventWiring />
+                <Stack
+                screenOptions={{
+                  headerStyle: { backgroundColor: 'transparent' },
+                  headerTintColor: colors.primary,
+                  headerTitleStyle: { fontWeight: '600' },
+                  contentStyle: { backgroundColor: 'transparent' },
+                }}
+              >
+                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                <Stack.Screen
+                  name="security"
+                  options={{ title: 'Security' }}
+                />
+                <Stack.Screen
+                  name="setup"
+                  options={{ headerShown: false, presentation: 'fullScreenModal' }}
+                />
+              </Stack>
+            </GlanceProvider>
+              </DesktopPresenceProvider>
+            </AmbientProvider>
+          )}
+        </View>
+        </ThemeProvider>
+      </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }

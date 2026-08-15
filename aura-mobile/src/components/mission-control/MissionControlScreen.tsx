@@ -20,6 +20,7 @@ import { radius } from '../../tokens/radius';
 import { duration } from '../../tokens/animation';
 import { haptic } from '../../motion/haptics';
 import { useWs } from '../../stores/wsStore';
+import { useSettings } from '../../stores/settingsStore';
 import { triggerBriefing, getBaseUrl } from '../../api/aura';
 import { useAmbient, AmbientOrbReactor } from '../../ambient';
 import { useDesktopPresence } from '../../desktop';
@@ -41,6 +42,7 @@ export default function MissionControlScreen() {
   const wsState = useWs((s) => s.state);
   const wsConnected = useWs((s) => s.connected);
   const wsReconnect = useWs((s) => s.reconnect);
+  const localBrainMode = useSettings((s) => s.localBrainMode);
   const insets = useSafeAreaInsets();
 
   const [hasError, setHasError] = useState(false);
@@ -56,12 +58,13 @@ export default function MissionControlScreen() {
     : 'disconnected';
 
   useEffect(() => {
-    if (!isConnected) {
-      const t = setTimeout(() => setHasError(true), 2500);
-      return () => clearTimeout(t);
+    if (localBrainMode || isConnected) {
+      setHasError(false);
+      return;
     }
-    setHasError(false);
-  }, [isConnected]);
+    const t = setTimeout(() => setHasError(true), 2500);
+    return () => clearTimeout(t);
+  }, [isConnected, localBrainMode]);
 
   const cards: CardData[] = useMemo(() => {
     const result: CardData[] = [];
