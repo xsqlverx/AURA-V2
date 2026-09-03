@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "AURA",
+    "slug": "aura-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "platforms": [
+      "android",
+      "web"
+    ],
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundColor": "#0a0a0f"
+      },
+      "package": "com.aura.mobile"
+    },
+    "scheme": "aura",
+    "plugins": [
+      "expo-router",
+      "expo-web-browser"
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "6510edf5-8485-4b98-b11c-100a1b7dc170"
+      }
+    },
+    "owner": "sqlver"
+  }
+}
