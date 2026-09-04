@@ -1,0 +1,72 @@
+{
+  "name": "react-native-needle",
+  "version": "0.1.1",
+  "description": "On-device structured extraction and tool calling for React Native \u2014 Cactus's Needle 2 (45M params) running natively on Android, fully offline.",
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
+  "sideEffects": false,
+  "bin": {
+    "react-native-needle": "bin/react-native-needle.js"
+  },
+  "files": [
+    "build",
+    "src",
+    "android",
+    "!android/libs",
+    "!android/build",
+    "!android/.cxx",
+    "!android/src/main/assets/*.cact",
+    "bin",
+    "scripts",
+    "expo-module.config.json",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "NEEDLE_LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf build",
+    "typecheck": "tsc --noEmit",
+    "postinstall": "node scripts/postinstall.js",
+    "prepack": "npm run clean && npm run build && node scripts/prepack-check.js",
+    "test": "npm run build && node --test test/*.test.mjs && node bin/react-native-needle.js > /dev/null && node scripts/prepack-check.js"
+  },
+  "keywords": [
+    "react-native",
+    "expo",
+    "expo-module",
+    "on-device",
+    "llm",
+    "slm",
+    "needle",
+    "cactus",
+    "tool-calling",
+    "structured-extraction",
+    "offline",
+    "edge-ai",
+    "android"
+  ],
+  "author": "Vigneshwaran M <vickyms008@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/VigneshDev16/react-native-needle.git"
+  },
+  "bugs": {
+    "url": "https://github.com/VigneshDev16/react-native-needle/issues"
+  },
+  "homepage": "https://github.com/VigneshDev16/react-native-needle#readme",
+  "peerDependencies": {
+    "expo": ">=51.0.0",
+    "react-native": "*"
+  },
+  "devDependencies": {
+    "expo-modules-core": "3.0.30",
+    "react-native": "0.81.5",
+    "typescript": "~5.9.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,48 @@
+apply plugin: 'com.android.library'
+
+group = 'expo.modules.needle'
+version = ''
+
+def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir.absolutePath, "ExpoModulesCorePlugin.gradle")
+apply from: expoModulesCorePlugin
+applyKotlinExpoModulesCorePlugin()
+useCoreDependencies()
+useExpoPublishing()
+
+buildscript {
+  ext.safeExtGet = { prop, fallback ->
+    rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
+  }
+}
+
+android {
+  namespace "expo.modules.needle"
+  compileSdkVersion safeExtGet("compileSdkVersion", 36)
+
+  defaultConfig {
+    minSdkVersion safeExtGet("minSdkVersion", 24)
+    targetSdkVersion safeExtGet("targetSdkVersion", 36)
+    versionCode 1
+    versionName ""
+
+    externalNativeBuild {
+      cmake {
+        cppFlags "-std=c++17 -fexceptions -frtti"
+        // arm64 only. Cactus's armeabi-v7a archive is built against a newer
+        // libc++ than NDK 27 ships (it needs std::__ndk1::__hash_memory), so it
+        // will not link here. Every 64-bit Android phone is covered; 32-bit-only
+        // devices simply don't get the feature, which `needleSupported` gates.
+        abiFilters "arm64-v8a"
+      }
+    }
+  }
+
+  externalNativeBuild {
+    cmake {
+      path "src/main/cpp/CMakeLists.txt"
+      version "3.22.1"
+    }
+  }
+
+  lintOptions { abortOnError false }
+}
