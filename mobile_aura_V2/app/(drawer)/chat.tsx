@@ -18,6 +18,7 @@ import { Toast } from '../../src/components/shared/Toast';
 import { useAppStore } from '../../src/store/appStore';
 import { useSettingsStore } from '../../src/store/settingsStore';
 import { classifyMessage } from '../../src/router/taskRouter';
+import { initNeedle, tryNeedleRoute, keywordClassify } from '../../src/router/needleRouter';
 import { executeMobileCapability } from '../../src/capabilities/mobileExecutor';
 import { checkPcConnection, sendToPc } from '../../src/api/client';
 import { streamFromOpenRouter } from '../../src/api/openrouter';
@@ -48,6 +49,15 @@ export default function ChatScreen() {
   } = useAppStore();
 
   const { openrouterApiKey } = useSettingsStore();
+  const needleReadyRef = useRef(false);
+
+  useEffect(() => {
+    initNeedle().then((ok) => {
+      needleReadyRef.current = ok;
+      devLog.info(`Needle init: ${ok ? 'ready' : 'fallback to keywords'}`);
+      if (!ok) showToast('On-device router unavailable, using keywords', 'info');
+    });
+  }, []);
 
   useEffect(() => {
     const check = async () => {
@@ -87,7 +97,21 @@ export default function ChatScreen() {
     setStreamingText('');
 
     try {
-      const route = classifyMessage(text);
+      // Needle try first with needleSupported + ungroundedFields gating, then fallback to keywords at chat.tsx:90
+      let route = null as ReturnType<typeof classifyMessage> | null;
+      try {
+        const needleRoute = await tryNeedleRoute(text);
+        if (needleRoute) {
+          route = needleRoute;
+          devLog.info('Routed via Needle', route);
+        } else {
+          route = keywordClassify(text);
+          devLog.info('Needle declined/unsupported, fallback to keyword', route);
+        }
+      } catch (e) {
+        devLog.warn('Needle routing error, fallback', e);
+        route = classifyMessage(text);
+      }
 
       if (route.target === 'MOBILE' && route.capability) {
         setOrbState('thinking');
