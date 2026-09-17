@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "activity"
 LOG_FILE = DATA_DIR / "log.jsonl"
 
-POLL_APPS_INTERVAL = 5
-POLL_BROWSER_INTERVAL = 60
+POLL_APPS_INTERVAL = 30
+POLL_BROWSER_INTERVAL = 300
 FOREGROUND_STALE_THRESHOLD = 120
 
 _lock = threading.Lock()

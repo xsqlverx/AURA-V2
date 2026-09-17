@@ -12,11 +12,26 @@ logger = logging.getLogger(__name__)
 
 SAMPLE_RATE  = 16000
 CHUNK_SIZE   = 1280
-SILENCE_SECS = 1.2
+SILENCE_SECS = 0.4
 SPEECH_THRESH = 300
 
 _model = None
 _model_lock = threading.Lock()
+_groq_client = None
+
+
+def _get_groq_client():
+    global _groq_client
+    if _groq_client is None:
+        try:
+            import os
+            from groq import Groq
+            api_key = os.getenv("GROQ_API_KEY")
+            if api_key:
+                _groq_client = Groq(api_key=api_key)
+        except Exception as e:
+            logger.warning("Could not initialize Groq client for STT: %s", e)
+    return _groq_client
 
 
 def load_whisper(size: str = "base"):
@@ -31,6 +46,26 @@ def load_whisper(size: str = "base"):
 
 
 def transcribe(wav_path: str) -> str:
+    # 1. Try Groq Whisper (ultra-fast cloud STT ~100-150ms)
+    client = _get_groq_client()
+    if client is not None:
+        try:
+            import os
+            with open(wav_path, "rb") as f:
+                res = client.audio.transcriptions.create(
+                    file=(os.path.basename(wav_path), f.read()),
+                    model="whisper-large-v3-turbo",
+                    response_format="text",
+                    language="en",
+                )
+            text = str(res).strip() if res else ""
+            if text:
+                logger.info("[STT] Groq Whisper: %r", text)
+                return text
+        except Exception as e:
+            logger.warning("[STT] Groq Whisper failed (%s), using local Whisper fallback", e)
+
+    # 2. Local Whisper fallback
     model = _model
     if model is None:
         logger.error("Whisper not loaded.")

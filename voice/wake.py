@@ -62,13 +62,7 @@ class WakeWordDetector:
 
     def stop(self) -> None:
         """Signal the listener to stop and wait for the thread to exit."""
-        try:
-            self._stop.set()
-            if self._thread is not None:
-                self._thread.join(timeout=12.0)
-                if self._thread.is_alive():
-                    logger.warning("WakeWordDetector thread did not exit within timeout")
-                self._thread = None
+k            self._thread = None
         except Exception:
             logger.warning("WakeWordDetector.stop failed", exc_info=True)
 

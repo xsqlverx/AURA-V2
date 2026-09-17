@@ -10,23 +10,24 @@ load_dotenv(Path(__file__).parent.parent / ".env.local")
 logger = logging.getLogger(__name__)
 
 # ── API Keys ─────────────────────────────────────────────────────────────────
-MISTRAL_API_KEY    = os.getenv("MISTRAL_API_KEY")      # Router + deep research
+MISTRAL_API_KEY    = os.getenv("MISTRAL_API_KEY")      # (unused — kept for reference)
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")   # Conversation
 GROQ_API_KEY       = os.getenv("GROQ_API_KEY")         # Tools
+NVIDIA_API_KEY     = os.getenv("NVIDIA_API_KEY")       # Deep research (Nvidia NIM)
 DISCORD_BOT_TOKEN  = os.getenv("DISCORD_BOT_TOKEN")
 TAVILY_API_KEY     = os.getenv("TAVILY_API_KEY")
 
-if not MISTRAL_API_KEY:
-    logger.warning("MISTRAL_API_KEY not set — router and deep research unavailable")
+if not NVIDIA_API_KEY:
+    logger.warning("NVIDIA_API_KEY not set — deep research unavailable")
 if not GROQ_API_KEY:
     logger.warning("GROQ_API_KEY not set — tool execution unavailable")
 if not OPENROUTER_API_KEY:
     logger.warning("OPENROUTER_API_KEY not set — conversation unavailable")
 
 # ── LLM Models ───────────────────────────────────────────────────────────────
-MODEL_DEEP    = "mistral-small-latest"                 # Router + deep research
+MODEL_DEEP    = "nvidia/nemotron-3-super-120b-a12b"    # Nvidia NIM deep research
 MODEL_FAST    = "meta-llama/llama-3.1-8b-instruct"     # OpenRouter conversation
-MODEL_TOOLS   = "llama-3.3-70b-versatile"              # Groq tool execution
+MODEL_TOOLS   = "openai/gpt-oss-120b"                  # Groq tool execution
 
 # ── Server ───────────────────────────────────────────────────────────────────
 SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")

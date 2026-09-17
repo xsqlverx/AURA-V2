@@ -44,7 +44,7 @@ def wait_for_backend():
     import requests
 
     logger.info("Waiting for backend...")
-    for _ in range(60):
+    for _ in range(120):
         try:
             r = requests.get("http://127.0.0.1:8000/health", timeout=1)
             if r.status_code == 200:

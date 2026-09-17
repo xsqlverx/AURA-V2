@@ -13,7 +13,6 @@ import sounddevice as sd
 
 from voice import emotion
 from voice.audio_utils import generate_amplitude_payload
-from core.server import ws_manager
 
 logger = logging.getLogger(__name__)
 
@@ -39,13 +38,69 @@ class BaseTTSEngine:
         self._gen_thread = threading.Thread(target=self._generator, daemon=True)
         self._gen_thread.start()
 
-        self._stream = sd.OutputStream(
+        self._stream = None
+        self._audio_available = True
+        self._ensure_stream(start=True)
+
+    def _create_stream(self):
+        """Create a fresh OutputStream. Raises on failure."""
+        return sd.OutputStream(
             samplerate=self._sample_rate,
             channels=1,
             callback=self._audio_callback,
             blocksize=1024,
         )
-        self._stream.start()
+
+    def _ensure_stream(self, start: bool = True) -> bool:
+        """(Re)create the output stream if missing/closed. Returns True if usable."""
+        try:
+            if self._stream is None:
+                self._stream = self._create_stream()
+            if start and not self._stream.active:
+                self._stream.start()
+            self._audio_available = True
+            return True
+        except Exception as e:
+            # MME error 6 / PaErrorCode -9999 = Windows output device vanished
+            # (BT unplugged, RDP, sleep, disabled audio). Don't crash — TTS
+            # queues still work, playback resumes when device returns.
+            self._audio_available = False
+            try:
+                default_out = sd.default.device[1] if hasattr(sd, "default") else "?"
+            except Exception:
+                default_out = "?"
+            logger.warning(
+                "Audio output unavailable (device=%s): %s. "
+                "Playback paused until a device returns.",
+                default_out, e,
+            )
+            try:
+                if self._stream is not None:
+                    self._stream.close(ignore_errors=True)
+            except Exception:
+                pass
+            self._stream = None
+            return False
+
+    def _safe_start(self) -> bool:
+        try:
+            if self._stream is None:
+                return self._ensure_stream(start=True)
+            if not self._stream.active:
+                self._stream.start()
+            self._audio_available = True
+            return True
+        except Exception as e:
+            logger.warning("Audio stream start failed (no output driver?): %s", e)
+            self._audio_available = False
+            return False
+
+    def _safe_abort(self):
+        try:
+            if self._stream is not None:
+                self._stream.abort()
+        except Exception:
+            pass  # already stopped / closed — not an error
 
     def _synthesize_now(self, text: str):
         raise NotImplementedError
@@ -91,11 +146,6 @@ class BaseTTSEngine:
                     outdata[n:, 0] = 0.0
                     self._audio_buffer = self._audio_buffer[n:]
                     wrote_audio = True
-                    try:
-                        payload = generate_amplitude_payload(outdata[:n, 0])
-                        ws_manager.broadcast_sync(payload)
-                    except Exception:
-                        pass
                 else:
                     outdata[:, 0] = 0.0
 
@@ -109,9 +159,13 @@ class BaseTTSEngine:
     def speak(self, text: str):
         if text and text.strip():
             self._text_queue.put(text)
+            if not self._audio_available:
+                # Device may have returned — retry once in background.
+                self._safe_start()
 
     def stop_playback(self):
-        self._stream.abort()
+        # Clear queues first so this never raises, even with no audio driver.
+        self._safe_abort()
         with self._buffer_lock:
             self._audio_buffer = np.array([], dtype=np.float32)
         while not self._text_queue.empty():
@@ -127,15 +181,15 @@ class BaseTTSEngine:
             except queue.Empty:
                 break
         self.is_speaking.clear()
-        self._stream.start()
+        self._safe_start()
 
     def pause(self):
         self._paused.set()
-        self._stream.abort()
+        self._safe_abort()
 
     def resume(self):
         self._paused.clear()
-        self._stream.start()
+        self._safe_start()
 
     def wait_until_done(self, timeout: float = 120.0):
         import time as _time
@@ -172,6 +226,14 @@ class BaseTTSEngine:
 
     def stop(self):
         self._stop.set()
+        try:
+            if self._stream is not None:
+                self._stream.abort()
+                self._stream.close(ignore_errors=True)
+        except Exception:
+            pass
+        finally:
+            self._stream = None
 
     def list_voices(self) -> list[str]:
         raise NotImplementedError
@@ -185,38 +247,42 @@ class BaseTTSEngine:
 
 
 class EdgeTTSEngine(BaseTTSEngine):
-    """Microsoft Edge TTS via edge-tts. Supports SSML emotion tags."""
+    """Microsoft Edge TTS via edge-tts with configurable speech rate boost."""
 
-    def __init__(self, voice: str = "en-US-AvaNeural"):
+    _DEFAULT_VOICES = [
+        "en-US-AvaNeural",
+        "en-US-JennyNeural",
+        "en-US-GuyNeural",
+        "en-US-AriaNeural",
+        "en-US-SteffanNeural",
+        "en-US-ChristopherNeural",
+        "en-GB-SoniaNeural",
+        "en-GB-RyanNeural",
+    ]
+
+    def __init__(self, voice: str = "en-US-AvaNeural", rate: str = None):
         import edge_tts
+        import os
         self._edge = edge_tts
+        self._rate = rate or os.getenv("TTS_RATE", "+20%")
 
-        try:
-            self._all_voices = asyncio.run(self._fetch_voices())
-        except Exception as e:
-            logger.warning("Failed to fetch Edge voice list: %s", e)
-            self._all_voices = [voice]
+        # Default voice list to avoid blocking startup on network fetch
+        self._all_voices = list(self._DEFAULT_VOICES)
 
+        # Fallback if an invalid voice (like old Supertonic 'F1') was passed
         if voice not in self._all_voices:
             fallback = "en-US-AvaNeural"
-            logger.warning("Voice %r not found, falling back to %s", voice, fallback)
-            if fallback in self._all_voices:
-                voice = fallback
+            logger.info("Edge voice %r not in standard list, using %s", voice, fallback)
+            voice = fallback
 
         super().__init__(voice)
-        logger.info("Edge TTS ready — voice: %s", voice)
-
-    @staticmethod
-    async def _fetch_voices():
-        import edge_tts
-        voices = await edge_tts.list_voices()
-        return sorted(v["ShortName"] for v in voices)
+        logger.info("Edge TTS ready — voice: %s (rate: %s)", voice, self._rate)
 
     def _synthesize_now(self, text: str):
         _, clean = emotion.clean_for_tts(text)
 
         async def _do():
-            communicate = self._edge.Communicate(clean, self._voice)
+            communicate = self._edge.Communicate(clean, self._voice, rate=self._rate)
             mp3_bytes = b""
             async for chunk in communicate.stream():
                 if chunk["type"] == "audio":
@@ -238,13 +304,16 @@ class EdgeTTSEngine(BaseTTSEngine):
         return list(self._all_voices)
 
     def set_voice(self, voice_name: str) -> bool:
-        if voice_name in self._all_voices:
-            with self._voice_lock:
-                self._voice = voice_name
-            logger.info("TTS voice switched to: %s", voice_name)
-            return True
-        logger.warning("Unknown voice: %s", voice_name)
-        return False
+        with self._voice_lock:
+            self._voice = voice_name
+        logger.info("TTS voice switched to: %s", voice_name)
+        return True
+
+    def set_rate(self, rate: str):
+        self._rate = rate
+        logger.info("Edge TTS rate set to: %s", rate)
+
+
 
 
 class SupertonicTTSEngine(BaseTTSEngine):
@@ -352,8 +421,13 @@ class KokoroTTSEngine(BaseTTSEngine):
         return False
 
 
-def create_engine(provider: str = "supertonic", voice: str = "F1") -> BaseTTSEngine:
+def create_engine(provider: str = None, voice: str = None) -> BaseTTSEngine:
     """Factory: returns the appropriate TTS engine."""
+    import os
+    if not provider:
+        provider = os.getenv("TTS_PROVIDER", "edge")
+    if not voice:
+        voice = os.getenv("TTS_VOICE", "en-US-AvaNeural" if provider == "edge" else "F1")
     provider = provider.lower().strip()
 
     logger.info("Creating TTS engine: provider=%s voice=%s", provider, voice)
@@ -366,3 +440,4 @@ def create_engine(provider: str = "supertonic", voice: str = "F1") -> BaseTTSEng
         return KokoroTTSEngine(voice=voice)
     else:
         raise ValueError(f"Unknown TTS provider: {provider!r}. Use 'edge', 'supertonic', or 'kokoro'.")
+

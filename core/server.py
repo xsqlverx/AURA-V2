@@ -108,8 +108,8 @@ def _start_socket_bridge() -> None:
 # ── TTS response helper ───────────────────────────────────────────────────────
 # Feeds UI chat/briefing responses to the TTS engine so Aura speaks them aloud.
 
-def _speak_response(text: str) -> None:
-    """Feed text to TTS (non-blocking) and broadcast speaking/idle states."""
+def _feed_tts(text: str) -> None:
+    """Feed a text sentence to TTS queue (non-blocking) and broadcast speaking state."""
     if not text.strip():
         return
     try:
@@ -119,9 +119,27 @@ def _speak_response(text: str) -> None:
             return
         ws_manager.broadcast_sync("STATE:speaking")
         tts.speak(text)
-        threading.Thread(target=_wait_tts_idle, args=(tts,), daemon=True).start()
     except Exception as e:
         logger.warning("TTS speak failed: %s", e)
+
+
+def _finish_tts() -> None:
+    """After all chunks have been fed, wait for TTS to complete, then broadcast idle."""
+    try:
+        from comms.state import get_tts
+        tts = get_tts()
+        if tts is not None:
+            threading.Thread(target=_wait_tts_idle, args=(tts,), daemon=True).start()
+    except Exception:
+        pass
+
+
+def _speak_response(text: str) -> None:
+    """Feed full text to TTS (non-blocking) and broadcast speaking/idle states."""
+    if not text.strip():
+        return
+    _feed_tts(text)
+    _finish_tts()
 
 
 def _wait_tts_idle(tts) -> None:
@@ -171,14 +189,16 @@ async def lifespan(app: FastAPI):
     jobs.set_broadcaster(ws_manager.broadcast_sync)
     pending.set_broadcaster(ws_manager.broadcast_sync)
 
-    # Pre-load Whisper model so first STT request is instant
-    try:
-        from voice.stt import load_whisper
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, lambda: load_whisper("tiny"))
-        logger.info("Whisper model pre-loaded.")
-    except Exception as e:
-        logger.warning("Whisper pre-load failed: %s", e)
+    # Pre-load Whisper in background so health endpoint is available immediately
+    def _background_whisper_load():
+        try:
+            from voice.stt import load_whisper
+            load_whisper("tiny")
+            logger.info("Whisper model pre-loaded (background).")
+        except Exception as e:
+            logger.warning("Whisper pre-load failed: %s", e)
+
+    threading.Thread(target=_background_whisper_load, daemon=True).start()
 
     yield
     logger.info("Aura backend shutting down.")
@@ -230,7 +250,7 @@ async def mobile_auth_middleware(request: Request, call_next):
 class ChatRequest(BaseModel):
     message: str
     history: list[dict] = []
-    mode: str = "deep"
+    mode: str = "auto"
     speak: bool = True  # if False, server skips _speak_response (used by voice pipeline to avoid double TTS)
 
 class MemoryCreate(BaseModel):
@@ -659,6 +679,7 @@ async def chat(req: ChatRequest):
 
     async def generate():
         full_response = []
+        speak_buffer = ""
         try:
             async for chunk in agent.run(
                 message=req.message,
@@ -667,6 +688,32 @@ async def chat(req: ChatRequest):
             ):
                 full_response.append(chunk)
                 yield chunk
+
+                if req.speak and chunk:
+                    speak_buffer += chunk
+                    is_first_chunk = (len(full_response) <= 2)
+                    while speak_buffer:
+                        m_sent = re.search(r'([.!?\n]+(?:\s+|$))', speak_buffer)
+                        m_clause = re.search(r'([,;:\u2014-]\s+)', speak_buffer) if is_first_chunk else None
+
+                        split_pos = -1
+                        if m_sent and m_sent.end() >= 8:
+                            split_pos = m_sent.end()
+                        elif m_clause and m_clause.end() >= 18:
+                            split_pos = m_clause.end()
+                        elif len(speak_buffer) > 60:
+                            sp = speak_buffer.rfind(" ", 0, 60)
+                            if sp > 25:
+                                split_pos = sp + 1
+
+                        if split_pos > 0:
+                            phrase = speak_buffer[:split_pos].strip()
+                            speak_buffer = speak_buffer[split_pos:].lstrip()
+                            if phrase:
+                                _feed_tts(phrase)
+                                is_first_chunk = False
+                        else:
+                            break
         except Exception as e:
             logger.error("Stream error: %s", e)
             yield "\n[Aura encountered an error. Please try again.]"
@@ -674,7 +721,9 @@ async def chat(req: ChatRequest):
         _append_transcript(f"[{datetime.now().strftime('%H:%M')}] Aura: {''.join(full_response)}\n")
 
         if req.speak:
-            _speak_response("".join(full_response))
+            if speak_buffer.strip():
+                _feed_tts(speak_buffer.strip())
+            _finish_tts()
 
     return StreamingResponse(generate(), media_type="text/plain")
 

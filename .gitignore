@@ -199,3 +199,12 @@ logs/
 # Legacy mobile app archive (detached — see C:\AURA_V2\legacy\aura-mobile)
 legacy/
 aura-mobile/
+
+# Android build cache
+.gradle/
+.cxx/
+build/
+
+# IDE / tools
+.opencode/
+

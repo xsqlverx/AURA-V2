@@ -79,7 +79,9 @@ async def _tavily_search(query: str, max_results: int = 5, depth: str = "basic")
     try:
         from tavily import TavilyClient
         client = TavilyClient(api_key=tavily_key)
-        r = client.search(query=query, search_depth=depth, max_results=max_results, include_answer=True)
+        r = await asyncio.to_thread(
+            client.search, query=query, search_depth=depth, max_results=max_results, include_answer=True
+        )
         results = r.get("results", [])
         if results:
             return {

@@ -4,6 +4,8 @@ import json
 import logging
 import socket
 from typing import Optional
+import os
+from pathlib import Path
 import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
@@ -15,6 +17,10 @@ from core.config import (
     VAULT_SIMILARITY_THRESHOLD,
     UI_SOCKET_PORT,
 )
+
+# Load the embedding model from a local folder when present so startup never
+# blocks on a HuggingFace download. Falls back to the cached HF name.
+_LOCAL_EMBEDDER_DIR = Path(__file__).resolve().parent.parent / "data" / "models" / "all-MiniLM-L6-v2"
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +35,9 @@ _VAULT_COLLECTION_NAME = "aura_vault"
 def _get_embedder() -> SentenceTransformer:
     global _embedder
     if _embedder is None:
-        _embedder = SentenceTransformer("all-MiniLM-L6-v2")
+        model_path = _LOCAL_EMBEDDER_DIR if _LOCAL_EMBEDDER_DIR.exists() else "all-MiniLM-L6-v2"
+        os.environ.setdefault("HF_HUB_OFFLINE", "1" if _LOCAL_EMBEDDER_DIR.exists() else "0")
+        _embedder = SentenceTransformer(str(model_path))
     return _embedder
 
 

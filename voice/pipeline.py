@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 SAMPLE_RATE    = 16000
 CHUNK_SIZE     = 1280
-SILENCE_SECS   = 0.8
+SILENCE_SECS   = 0.4
 SPEECH_THRESH  = 300
 WAKE_MODEL     = "hey_jarvis"
 DETECT_THRESH  = 0.5
@@ -85,6 +85,7 @@ _VOICE_INTENT_KEYWORDS = {
 ptt_active = threading.Event()
 flow_mode  = threading.Event()
 _stop      = threading.Event()
+_active_tts = None
 
 # When True, the voice session releases the mic so dictation (/dictation) can record.
 _dictation_active = False
@@ -141,6 +142,9 @@ def _start_keyboard_listener():
 
     def on_press(key):
         if key == keyboard.Key.shift_r and not ptt_active.is_set():
+            if _active_tts and _active_tts.is_speaking.is_set():
+                _active_tts.stop_playback()
+                logger.info("PTT barge-in: stopped TTS playback.")
             ptt_active.set()
             logger.info("PTT active.")
             send_state("listening")
@@ -225,8 +229,41 @@ def record_speech(ptt_mode: bool = False) -> str | None:
 
 
 # ── Transcribe ────────────────────────────────────────────────────────────────
+_groq_stt_client = None
+
+def _get_groq_stt_client():
+    global _groq_stt_client
+    if _groq_stt_client is None:
+        try:
+            from groq import Groq
+            api_key = os.getenv("GROQ_API_KEY")
+            if api_key:
+                _groq_stt_client = Groq(api_key=api_key)
+        except Exception as e:
+            logger.warning("Could not initialize Groq client for STT: %s", e)
+    return _groq_stt_client
+
 
 def transcribe(whisper, wav_path: str) -> str:
+    # 1. Try Groq Whisper (ultra-fast cloud STT ~100-150ms)
+    client = _get_groq_stt_client()
+    if client is not None:
+        try:
+            with open(wav_path, "rb") as f:
+                res = client.audio.transcriptions.create(
+                    file=(os.path.basename(wav_path), f.read()),
+                    model="whisper-large-v3-turbo",
+                    response_format="text",
+                    language="en",
+                )
+            text = str(res).strip() if res else ""
+            if text:
+                logger.info("[STT] Groq Whisper: %r", text)
+                return text
+        except Exception as e:
+            logger.warning("[STT] Groq Whisper failed (%s), using local Whisper fallback", e)
+
+    # 2. Local Whisper fallback
     try:
         segments, _ = whisper.transcribe(wav_path)
         return " ".join(s.text for s in segments).strip()
@@ -467,32 +504,38 @@ async def _stream_to_tts_async(text: str, history: list, tts) -> str:
     buffer = ""
     full_reply = []
 
-    async for chunk in run(text, past):
+    async for chunk in run(text, past, mode="auto"):
         if not chunk:
             continue
         buffer += chunk
 
-        # Feed TTS — sentence-boundary splits at ~60+ chars for fast first audio
-        while len(buffer) > 60:
-            split_at = -1
-            for sep in (". ", "! ", "? "):
-                idx = buffer.rfind(sep, 0, -1)
-                if idx > 30:
-                    split_at = max(split_at, idx + 1)
-            if split_at > 30:
-                phrase = buffer[:split_at]
-                buffer = buffer[split_at + 1:]
+        # Feed TTS — split early on sentence/clause boundaries for instant voice response
+        is_first_chunk = (len(full_reply) == 0)
+        while buffer:
+            m_sent = re.search(r'([.!?\n]+(?:\s+|$))', buffer)
+            m_clause = re.search(r'([,;:\u2014-]\s+)', buffer) if is_first_chunk else None
+
+            split_pos = -1
+            if m_sent and m_sent.end() >= 8:
+                split_pos = m_sent.end()
+            elif m_clause and m_clause.end() >= 18:
+                split_pos = m_clause.end()
+            elif len(buffer) > 60:
+                sp = buffer.rfind(" ", 0, 60)
+                if sp > 25:
+                    split_pos = sp + 1
+
+            if split_pos > 0:
+                phrase = buffer[:split_pos].strip()
+                buffer = buffer[split_pos:].lstrip()
+                if phrase:
+                    send_state("speaking")
+                    tts.speak(phrase)
+                    display_briefing_chunk(phrase)
+                    full_reply.append(phrase)
+                    is_first_chunk = False
             else:
-                last_space = buffer.rfind(" ", 0, -1)
-                if last_space < 30:
-                    break
-                phrase = buffer[:last_space]
-                buffer = buffer[last_space + 1:]
-            if phrase.strip():
-                send_state("speaking")
-                tts.speak(phrase.strip())
-                display_briefing_chunk(phrase.strip())
-                full_reply.append(phrase.strip())
+                break
 
     # Flush remaining buffer
     if buffer.strip():
@@ -581,7 +624,10 @@ def _process_utterance(tts, whisper, history, wav_path) -> bool:
 # ── Session ───────────────────────────────────────────────────────────────────
 
 def run_session(tts, whisper, history: list, ptt_mode: bool = False):
-    tts.wait_until_done()
+    if ptt_mode and tts and tts.is_speaking.is_set():
+        tts.stop_playback()
+    else:
+        tts.wait_until_done()
 
     wav_path = record_speech(ptt_mode=ptt_mode)
     if not wav_path:
@@ -638,6 +684,9 @@ def _flow_listen_loop(tts, whisper, history):
                     pre_buf.pop(0)
 
                 if amplitude > SPEECH_THRESH:
+                    if tts and tts.is_speaking.is_set():
+                        tts.stop_playback()
+                        logger.info("Flow mode barge-in: speech detected, stopped playback.")
                     frames = list(pre_buf) + [chunk.copy()]
                     speech_started = True
                     pre_buf.clear()
@@ -687,6 +736,9 @@ def _flow_listen_loop(tts, whisper, history):
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
 def run(tts, whisper_size: str = "tiny"):
+    global _active_tts
+    _active_tts = tts
+
     import openwakeword
     from openwakeword.model import Model
     from faster_whisper import WhisperModel

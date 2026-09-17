@@ -1,10 +1,10 @@
 """Agent loop — classify intent, route to provider, run tools if needed, respond.
 
 Four-provider architecture:
-  Classifier:   Gemini 1.5 Flash  → TRUE (tools needed) or FALSE (conversation)
+  Classifier:   Needle (local 45M)  → TRUE (tools needed) or FALSE (conversation)
   Conversation: OpenRouter         → no tools, no web
   Tools:        Groq Llama 3.3    → native <function=name> tool execution
-  Research:     Mistral Small      → deep summarization after tool loop
+  Research:     Nvidia NIM DeepSeek → deep summarization after tool loop
 """
 
 import json
@@ -17,7 +17,7 @@ from typing import AsyncIterator
 
 from core.config import MEMORY_AUTOSAVE_INTERVAL, STAGE_CONFIRMATIONS
 from core.router import classify_intent, get_client_and_model
-from core import jobs, pending
+from core import jobs, pending, fastpath
 from memory import chroma_store
 from memory.context import get_context_block
 from memory.memory_tool import handle_memory_tool
@@ -30,7 +30,7 @@ from tools.study import study as study_fn
 
 logger = logging.getLogger(__name__)
 
-MAX_TOOL_ROUNDS = 3
+MAX_TOOL_ROUNDS = 10
 _turns_since_memory = 0
 _turns_lock = threading.Lock()
 
@@ -41,13 +41,20 @@ def _scrub(text: str) -> str:
         text = text.replace(tag, "").replace(tag.upper(), "")
     # Strip <memory ...> and </memory> tags that leak from the LLM
     text = re.sub(r"</?memory[^>]*>", "", text, flags=re.IGNORECASE)
-    # Strip <function=toolname>...<function=toolname> or </function> leaks
-    text = re.sub(r"</?function[^>]*>", "", text, flags=re.IGNORECASE)
+    # Strip complete <function=name {json}<function=name> or <function=name {json}</function>
+    text = re.sub(r"<function=\w+\s*\{[^}]*\}<function=\w+>", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"<function=\w+\s*\{[^}]*\}</function>", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"<function=\w+\s*\{[^}]*\}>", "", text, flags=re.IGNORECASE)
+    # Strip bare <function=name> and </function>
+    text = re.sub(r"<function=\w+>", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"</function>", "", text, flags=re.IGNORECASE)
+    # Catch any remaining partial <function tags (split across streaming chunks)
+    text = re.sub(r"<function\b[^>]*", "", text, flags=re.IGNORECASE)
     return text
 
 
 def _strip_tail_tags(text: str) -> str:
-    tag = re.search(r"</?(?:function|memory)\b", text, flags=re.IGNORECASE)
+    tag = re.search(r"</?(?:function|memory)\b|<fu(?:n(?:c(?:t(?:i(?:o(?:n)?)?)?)?)?)?", text, flags=re.IGNORECASE)
     if tag:
         return text[: tag.start()]
     return text
@@ -59,7 +66,7 @@ async def _scrub_stream(chunks):
     async for delta in chunks:
         buf = pending + delta
         cleaned = _scrub(buf)
-        tag = re.search(r"</?(?:function|memory)\b", cleaned, flags=re.IGNORECASE)
+        tag = re.search(r"</?(?:function|memory)\b|<fu(?:n(?:c(?:t(?:i(?:o(?:n)?)?)?)?)?)?", cleaned, flags=re.IGNORECASE)
         if tag:
             cut = tag.start()
             pending = cleaned[cut:]
@@ -121,6 +128,16 @@ don't mention them otherwise. Keep responses concise unless depth is asked for. 
 Always respond in English EVEN IF the user writes,speaks in another language.
 
 Be warm, direct, and conversational. Short and natural.
+
+## Research Mode
+When the user asks you to research, investigate, compare, or find information about \
+a topic — go deep. Do MULTIPLE web searches (3-5+), scrape relevant pages, gather \
+real data, then synthesize everything into a thorough, well-organized response. \
+Don't just search once and return — dig deeper, cross-reference, check multiple \
+sources. The user expects you to spend time researching before answering. \
+After each search, evaluate if you need more info. Keep searching until you \
+have enough to give a comprehensive answer. \
+NEVER say "I'll search for that" — just search silently and deliver the result.
 
 ## Memory Behavior
 You have a `memory` tool to save important facts long-term. \
@@ -228,10 +245,16 @@ Use this information to make your responses personal and helpful — \
 but remember you cannot save new memories or run any tools."""
 
 
-async def _build_system_prompt(persona: str = AURA_PERSONA_TOOLS) -> str:
+async def _build_system_prompt(persona: str = AURA_PERSONA_TOOLS, query: str = "") -> str:
+    import asyncio
     context = await get_context_block()
-    results = chroma_store.get_relevant(context)
-    memories = [r["text"] for r in results]
+    memories = []
+    if query and query.strip():
+        try:
+            results = await asyncio.to_thread(chroma_store.get_relevant, query.strip())
+            memories = [r["text"] for r in results]
+        except Exception as e:
+            logger.warning("Failed to retrieve relevant memories: %s", e)
 
     parts = [persona]
     if context:
@@ -275,11 +298,14 @@ async def _build_system_prompt(persona: str = AURA_PERSONA_TOOLS) -> str:
 
 
 async def _build_vault_context(message: str) -> str | None:
-    vault_hints = {"note", "study", "lecture", "assignment", "project", "research",
-                   "remember", "what is", "what was", "how do", "explain", "my notes"}
+    import asyncio
+    vault_hints = {"note", "notes", "study", "lecture", "assignment", "vault", "my notes"}
     if not any(h in message.lower() for h in vault_hints):
         return None
-    results = vault_module.search(message)
+    try:
+        results = await asyncio.to_thread(vault_module.search, message)
+    except Exception:
+        return None
     if not results or results.get("count", 0) == 0:
         return None
     snippets = []
@@ -411,10 +437,18 @@ async def _run_tool(name: str, args: dict, job_id: str | None = None) -> str:
                 global _turns_since_memory
                 with _turns_lock:
                     _turns_since_memory = 0
+                text = args.get("text", "")
+                if not text.strip():
+                    key = args.get("key", "").strip()
+                    value = args.get("value", "").strip()
+                    if key and value:
+                        text = f"{key}: {value}"
+                    elif value:
+                        text = value
                 result = handle_memory_tool(
                     action=args.get("action", ""),
                     category=args.get("category", "user"),
-                    text=args.get("text", ""),
+                    text=text,
                     identifier=args.get("identifier", ""),
                 )
             case "study":
@@ -446,17 +480,33 @@ async def _run_tool(name: str, args: dict, job_id: str | None = None) -> str:
         return json.dumps({"error": str(e)})
 
 
+def _save_turns_bg(user_msg: str, aura_msg: str) -> None:
+    """Save user + assistant turn in the background without blocking the generator."""
+    def _do_save():
+        try:
+            chroma_store.save(f"User: {user_msg}")
+            chroma_store.save(f"Aura: {aura_msg}")
+        except Exception as e:
+            logger.debug("Background memory save failed: %s", e)
+
+    try:
+        loop = asyncio.get_running_loop()
+        loop.run_in_executor(None, _do_save)
+    except Exception:
+        threading.Thread(target=_do_save, daemon=True).start()
+
+
 # ── Agent Loop ────────────────────────────────────────────────────────────────
 # Flow:
-#   1. classify_intent(message) via Gemini 1.5 Flash → TRUE / FALSE
+#   1. classify_intent(message) via keyword matching → TRUE / FALSE
 #   2. FALSE → OpenRouter + AURA_PERSONA_CONVO (pure conversation, no tools)
 #   3. TRUE  → Groq + AURA_PERSONA_TOOLS (tool loop via <function=name>)
-#   4. After tool loop → Mistral (deep mode) or OpenRouter (auto mode)
+#   4. mode=="deep" only → Nvidia NIM for deep summarization after tool loop
 
 async def run(
     message: str,
     history: list[dict],
-    mode: str = "deep",
+    mode: str = "auto",
 ) -> AsyncIterator[str]:
     """Public entry point — wraps _run with agent-job tracking for the island."""
     job_id = jobs.start_job(message)
@@ -475,7 +525,7 @@ async def run(
 async def _run(
     message: str,
     history: list[dict],
-    mode: str = "deep",
+    mode: str = "auto",
     job_id: str | None = None,
 ) -> AsyncIterator[str]:
     global _turns_since_memory
@@ -516,16 +566,43 @@ async def _run(
         logger.info("YouTube play guard → forcing play_youtube(query=%r)", _query)
         result = system.play_youtube(_query)
         _summary = f"Playing {_query} on YouTube 🎵" if not result.get("error") else f"Couldn't play that: {result.get('error')}"
-        chroma_store.save(f"User: {message}")
-        chroma_store.save(f"Aura: {_summary}")
+        _save_turns_bg(message, _summary)
         yield _summary
         return
+
+    # ── FASTPATH: Instant execution for simple operations ──────────────────────
+    # Skip LLM inference entirely for common patterns like "open chrome",
+    # "create folder foo", "go to youtube.com", etc.
+    logger.info("[AGENT] Checking fast-path for: %r", message)
+    fastpath_match = await fastpath.try_fastpath(message)
+    if fastpath_match:
+        tool_name, tool_args = fastpath_match
+        logger.info("[AGENT] ✓ FASTPATH MATCHED! Executing instantly without LLM: %s", tool_name)
+        try:
+            result_json = await _run_tool(tool_name, tool_args, job_id)
+            result = json.loads(result_json)
+            # Summarize result for user
+            _success = result.get("success", True) if isinstance(result, dict) else not result.get("error")
+            if _success:
+                _label = _tool_human_detail(tool_name, tool_args)
+                yield f"✓ {_label}"
+                logger.info("[AGENT] ✓ Fastpath execution SUCCESS: %s", _label)
+            else:
+                error_msg = result.get("error", "Operation failed")
+                yield f"⚠ {error_msg}"
+                logger.warning("[AGENT] ⚠ Fastpath execution FAILED: %s", error_msg)
+            return
+        except Exception as e:
+            logger.error("[AGENT] ✗ Fastpath execution ERROR: %s (falling back to LLM)", e)
+            # Fall through to normal flow on error
+    else:
+        logger.info("[AGENT] ✗ No fastpath match → routing to LLM")
 
     vault_ctx = await _build_vault_context(message)
 
     # ── CONVERSATION PATH (OpenRouter + AURA_PERSONA_CONVO) ──────────────────
     if not needs_tools:
-        system_prompt = await _build_system_prompt(AURA_PERSONA_CONVO)
+        system_prompt = await _build_system_prompt(AURA_PERSONA_CONVO, query=message)
         if vault_ctx:
             system_prompt += "\n\n" + vault_ctx
         messages = [
@@ -553,12 +630,12 @@ async def _run(
         async for piece in _scrub_stream(deltas()):
             full_response.append(piece)
             yield piece
-        chroma_store.save(f"User: {message}")
-        chroma_store.save(f"Aura: {''.join(full_response)}")
+        _save_turns_bg(message, "".join(full_response))
         return
 
     # ── TOOL PATH (Groq + AURA_PERSONA_TOOLS) ────────────────────────────────
-    system_prompt = await _build_system_prompt(AURA_PERSONA_TOOLS)
+    logger.info("[AGENT] Entering TOOL PATH (LLM will make tool calls)")
+    system_prompt = await _build_system_prompt(AURA_PERSONA_TOOLS, query=message)
     if vault_ctx:
         system_prompt += "\n\n" + vault_ctx
 
@@ -636,34 +713,58 @@ async def _run(
             cleaned = _scrub(msg.content).strip()
             if cleaned:
                 if mode == "deep":
-                    # Route through Mistral for deep summarization
+                    # Route through Nvidia NIM for deep summarization (fallback to OpenRouter)
                     client, model = get_client_and_model("deep")
-                    logger.info("[LLM] stage=deep-summary model=%s stream=True", model)
-                    stream = await client.chat.completions.create(
-                        model=model,
-                        messages=messages,
-                        stream=True,
-                        max_tokens=1024,
-                        timeout=30.0,
-                    )
+                    try:
+                        logger.info("[LLM] stage=deep-summary model=%s stream=True", model)
+                        stream = await client.chat.completions.create(
+                            model=model,
+                            messages=messages,
+                            stream=True,
+                            max_tokens=1024,
+                            timeout=30.0,
+                        )
 
-                    async def deltas():
-                        async for chunk in stream:
-                            d = chunk.choices[0].delta.content or ""
-                            if d:
-                                yield d
+                        async def deltas():
+                            async for chunk in stream:
+                                d = chunk.choices[0].delta.content or ""
+                                if d:
+                                    yield d
 
-                    full_response = []
-                    async for piece in _scrub_stream(deltas()):
-                        full_response.append(piece)
-                        yield piece
-                    chroma_store.save(f"User: {message}")
-                    chroma_store.save(f"Aura: {''.join(full_response)}")
-                    return
+                        full_response = []
+                        async for piece in _scrub_stream(deltas()):
+                            full_response.append(piece)
+                            yield piece
+                        _save_turns_bg(message, "".join(full_response))
+                        return
+                    except Exception as e:
+                        logger.warning("Nvidia NIM failed (%s), falling back to OpenRouter", e)
+                        client, model = get_client_and_model("convo")
+                        logger.info("[LLM] stage=deep-summary-fallback model=%s stream=True", model)
+                        stream = await client.chat.completions.create(
+                            model=model,
+                            messages=messages,
+                            stream=True,
+                            max_tokens=1024,
+                            timeout=30.0,
+                        )
 
+                        async def deltas():
+                            async for chunk in stream:
+                                d = chunk.choices[0].delta.content or ""
+                                if d:
+                                    yield d
+
+                        full_response = []
+                        async for piece in _scrub_stream(deltas()):
+                            full_response.append(piece)
+                            yield piece
+                        _save_turns_bg(message, "".join(full_response))
+                        return
+
+                # Normal / auto mode: yield Groq's tool completion immediately!
                 yield cleaned
-                chroma_store.save(f"User: {message}")
-                chroma_store.save(f"Aura: {msg.content}")
+                _save_turns_bg(message, cleaned)
                 return
 
         break
@@ -673,15 +774,30 @@ async def _run(
         client, model = get_client_and_model("deep")
     else:
         client, model = get_client_and_model("convo")
-    logger.info("[LLM] stage=post-tool model=%s stream=True", model)
 
-    stream = await client.chat.completions.create(
-        model=model,
-        messages=messages,
-        stream=True,
-        max_tokens=1024,
-        timeout=30.0,
-    )
+    try:
+        logger.info("[LLM] stage=post-tool model=%s stream=True", model)
+        stream = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            stream=True,
+            max_tokens=1024,
+            timeout=30.0,
+        )
+    except Exception as e:
+        if mode == "deep":
+            logger.warning("Nvidia NIM failed (%s), falling back to OpenRouter", e)
+            client, model = get_client_and_model("convo")
+            logger.info("[LLM] stage=post-tool-fallback model=%s stream=True", model)
+            stream = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                stream=True,
+                max_tokens=1024,
+                timeout=30.0,
+            )
+        else:
+            raise
 
     async def deltas():
         async for chunk in stream:
@@ -694,5 +810,4 @@ async def _run(
         full_response.append(piece)
         yield piece
 
-    chroma_store.save(f"User: {message}")
-    chroma_store.save(f"Aura: {''.join(full_response)}")
+    _save_turns_bg(message, "".join(full_response))
