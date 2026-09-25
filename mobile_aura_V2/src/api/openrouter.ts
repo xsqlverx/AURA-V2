@@ -1,25 +1,43 @@
-import { useSettingsStore, OPENROUTER_BASE_URL } from '../store/settingsStore';
+import { useSettingsStore, LLMProvider } from '../store/settingsStore';
 
-const AURA_SYSTEM_PROMPT = `You are AURA, a personal AI assistant running on the user's phone. You are concise, direct, and helpful. You speak naturally — no filler, no fluff.
+const AURA_SYSTEM_PROMPT = `You are AURA, an elite personal AI companion and copilot living on Kenaz's phone. You are warm, confident, sharp, and concise. You speak naturally with intelligence and a subtle companion warmth — never robotic or overly verbose.
 
-You can call tools by writing a tool_call block like this:
+You can trigger on-device phone capabilities by outputting a structured action block:
 \`\`\`tool_call
-{"tool": "tool_name", "params": {"key": "value"}}
+{"tool": "open_app", "params": {"package": "com.whatsapp"}}
 \`\`\`
 
-Available tools:
-- open_app: {"tool": "open_app", "params": {"package": "com.package.name"}}
-- make_call: {"tool": "make_call", "params": {"number": "+1234567890"}}
-- send_sms: {"tool": "send_sms", "params": {"number": "+1234567890", "message": "text"}}
-- open_url: {"tool": "open_url", "params": {"url": "https://example.com"}}
-- set_reminder: {"tool": "set_reminder", "params": {"text": "reminder text", "time": "ISO string"}}
+Available on-device capabilities:
+- open_app: {"tool": "open_app", "params": {"package": "app_name_or_id"}}
+- make_call: {"tool": "make_call", "params": {"number": "phone_number"}}
+- send_sms: {"tool": "send_sms", "params": {"number": "phone_number", "message": "text"}}
+- open_url: {"tool": "open_url", "params": {"url": "https://..."}}
+- open_settings: {"tool": "open_settings", "params": {}}
 
-If the user asks something that doesn't need a tool, just respond normally in plain text. Keep responses short and useful.`;
+If the prompt is conversational, answer with high intelligence and elegance. Keep spoken replies natural and crisp.`;
 
 export interface StreamCallbacks {
   onToken: (token: string) => void;
   onDone: (fullText: string) => void;
   onError: (error: Error) => void;
+}
+
+function getProviderEndpoint(provider: LLMProvider, customUrl?: string): string {
+  switch (provider) {
+    case 'groq':
+      return 'https://api.groq.com/openai/v1/chat/completions';
+    case 'nvidia':
+      return 'https://integrate.api.nvidia.com/v1/chat/completions';
+    case 'cerebras':
+      return 'https://api.cerebras.ai/v1/chat/completions';
+    case 'sambanova':
+      return 'https://api.sambanova.ai/v1/chat/completions';
+    case 'custom':
+      return customUrl || 'https://openrouter.ai/api/v1/chat/completions';
+    case 'openrouter':
+    default:
+      return 'https://openrouter.ai/api/v1/chat/completions';
+  }
 }
 
 export function streamFromOpenRouter(
@@ -28,38 +46,52 @@ export function streamFromOpenRouter(
   callbacks: StreamCallbacks,
   signal?: AbortSignal
 ): () => void {
-  const { openrouterApiKey, llmModel } = useSettingsStore.getState();
+  const { activeProvider, llmModel, customEndpointUrl } = useSettingsStore.getState();
+  const apiKey = useSettingsStore.getState().getActiveApiKey();
 
-  if (!openrouterApiKey) {
-    callbacks.onError(new Error('No API key configured. Go to Settings to add your OpenRouter key.'));
+  if (!apiKey && activeProvider !== 'openrouter') {
+    callbacks.onError(
+      new Error(`No API key for ${activeProvider.toUpperCase()}. Configure in Settings.`)
+    );
     return () => {};
   }
 
+  const endpoint = getProviderEndpoint(activeProvider, customEndpointUrl);
+
   const messages = [
     { role: 'system', content: AURA_SYSTEM_PROMPT },
-    ...history.slice(-10).map(m => ({ role: m.role, content: m.content })),
+    ...history.slice(-10).map((m) => ({ role: m.role, content: m.content })),
     { role: 'user', content: message },
   ];
 
-  const model = llmModel || 'openrouter/free';
+  const model = llmModel || (activeProvider === 'groq' ? 'llama-3.3-70b-versatile' : 'openrouter/free');
 
   let cancelled = false;
   let accumulated = '';
 
   (async () => {
     try {
-      const res = await fetch(OPENROUTER_BASE_URL, {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+
+      if (apiKey) {
+        headers['Authorization'] = `Bearer ${apiKey}`;
+      }
+
+      if (activeProvider === 'openrouter') {
+        headers['HTTP-Referer'] = 'https://aura-mobile.app';
+        headers['X-Title'] = 'AURA Mobile V2';
+      }
+
+      const res = await fetch(endpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${openrouterApiKey}`,
-          'HTTP-Referer': 'https://aura-mobile.app',
-          'X-Title': 'AURA Mobile',
-        },
+        headers,
         body: JSON.stringify({
           model,
           messages,
           stream: true,
+          temperature: 0.7,
         }),
         signal,
       });
@@ -67,13 +99,16 @@ export function streamFromOpenRouter(
       if (!res.ok) {
         const errBody = await res.text();
         if (res.status === 429) {
-          throw new Error('Rate limited. Try again in a moment.');
+          throw new Error('Rate limit reached on provider tier. Retrying fallback...');
         }
-        throw new Error(`API error ${res.status}: ${errBody.slice(0, 200)}`);
+        if (res.status === 401) {
+          throw new Error('Invalid API Key. Please verify key in Settings.');
+        }
+        throw new Error(`API Error ${res.status}: ${errBody.slice(0, 160)}`);
       }
 
       const reader = res.body?.getReader();
-      if (!reader) throw new Error('No response body');
+      if (!reader) throw new Error('Streaming not supported in this runtime');
 
       const decoder = new TextDecoder();
       let buffer = '';

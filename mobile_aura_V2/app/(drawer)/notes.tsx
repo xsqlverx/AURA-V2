@@ -11,16 +11,17 @@ import {
   StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from 'expo-router';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { Colors } from '../../src/constants/colors';
 import { Theme } from '../../src/constants/theme';
+import { TopHudBar } from '../../src/components/navigation/TopHudBar';
+import { BottomTabBar } from '../../src/components/navigation/BottomTabBar';
+import { ParticleBackground } from '../../src/components/effects/ParticleBackground';
 import { vaultList, vaultRead, vaultCreate, vaultDelete } from '../../src/api/client';
 
 type Note = { title: string; modified_at?: string; folder?: string };
 
 export default function NotesScreen() {
-  const navigation = useNavigation();
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -42,7 +43,9 @@ export default function NotesScreen() {
     }
   }, []);
 
-  useEffect(() => { loadNotes(); }, [loadNotes]);
+  useEffect(() => {
+    loadNotes();
+  }, [loadNotes]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -77,16 +80,20 @@ export default function NotesScreen() {
   };
 
   const handleDelete = (title: string) => {
-    Alert.alert('Delete', `Delete "${title}"?`, [
+    Alert.alert('Delete Note', `Delete "${title}" from Obsidian vault?`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
-        try {
-          await vaultDelete(title);
-          loadNotes();
-        } catch (e: any) {
-          Alert.alert('Error', e.message || 'Failed to delete note');
-        }
-      }},
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await vaultDelete(title);
+            loadNotes();
+          } catch (e: any) {
+            Alert.alert('Error', e.message || 'Failed to delete note');
+          }
+        },
+      },
     ]);
   };
 
@@ -98,10 +105,12 @@ export default function NotesScreen() {
         onLongPress={() => handleDelete(item.title)}
       >
         <View style={styles.noteIconWrap}>
-          <Text style={styles.noteIcon}>📝</Text>
+          <Text style={styles.noteIcon}>📋</Text>
         </View>
         <View style={styles.noteInfo}>
-          <Text style={styles.noteTitle} numberOfLines={1}>{item.title}</Text>
+          <Text style={styles.noteTitle} numberOfLines={1}>
+            {item.title}
+          </Text>
           {item.modified_at ? <Text style={styles.noteDate}>{item.modified_at}</Text> : null}
         </View>
         <Text style={styles.noteChevron}>›</Text>
@@ -112,43 +121,41 @@ export default function NotesScreen() {
   if (selected) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <Pressable onPress={() => setSelected(null)} style={styles.backBtn}>
-            <Text style={styles.backIcon}>←</Text>
-          </Pressable>
-          <Text style={styles.headerTitle} numberOfLines={1}>{selected.title}</Text>
-          <View style={{ width: 40 }} />
-        </View>
-        <ScrollView style={styles.detailScroll} contentContainerStyle={{ padding: Theme.spacing.md }}>
+        <ParticleBackground />
+        <TopHudBar title={selected.title} subtitle="OBSIDIAN VAULT NOTE" showBack />
+        <ScrollView style={styles.detailScroll} contentContainerStyle={{ padding: 16 }}>
           <View style={styles.detailCard}>
             <Text style={styles.detailContent}>{selected.content}</Text>
           </View>
+          <Pressable style={styles.closeBtn} onPress={() => setSelected(null)}>
+            <Text style={styles.closeBtnText}>← BACK TO VAULT</Text>
+          </Pressable>
         </ScrollView>
+        <BottomTabBar />
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Pressable
-          style={styles.menuBtn}
-          onPress={() => navigation.dispatch({ type: 'OPEN_DRAWER' })}
-        >
-          <Text style={styles.menuIcon}>☰</Text>
-        </Pressable>
-        <View style={styles.headerIconWrap}>
-          <Text style={styles.headerIconText}>📋</Text>
+      <ParticleBackground />
+      <TopHudBar title="VAULT" subtitle={`${notes.length} OBSIDIAN NOTES`} />
+
+      {/* Action Strip */}
+      <View style={styles.actionStrip}>
+        <View style={styles.searchRow}>
+          <Text style={styles.searchIcon}>🔍</Text>
+          <TextInput
+            style={styles.searchInput}
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Search vault notes..."
+            placeholderTextColor={Colors.text.dim}
+          />
         </View>
-        <View style={styles.headerTextCol}>
-          <Text style={styles.headerTitle}>Notes</Text>
-          <Text style={styles.headerSub}>{notes.length} notes</Text>
-        </View>
-        <Pressable
-          style={styles.addBtn}
-          onPress={() => setCreating(!creating)}
-        >
-          <Text style={styles.addBtnText}>{creating ? '✕' : '+'}</Text>
+
+        <Pressable style={styles.addBtn} onPress={() => setCreating(!creating)}>
+          <Text style={styles.addBtnText}>{creating ? '✕' : '+ NEW'}</Text>
         </Pressable>
       </View>
 
@@ -166,36 +173,22 @@ export default function NotesScreen() {
             style={[styles.createInput, styles.createContent]}
             value={newContent}
             onChangeText={setNewContent}
-            placeholder="Note content..."
+            placeholder="Markdown content..."
             placeholderTextColor={Colors.text.dim}
             multiline
           />
           <Pressable
-            style={[styles.createBtn, (!newTitle.trim() || !newContent.trim()) && styles.createBtnDisabled]}
+            style={[
+              styles.createBtn,
+              (!newTitle.trim() || !newContent.trim()) && styles.createBtnDisabled,
+            ]}
             onPress={handleCreate}
             disabled={!newTitle.trim() || !newContent.trim()}
           >
-            <Text style={styles.createBtnText}>Create Note</Text>
+            <Text style={styles.createBtnText}>SAVE TO VAULT</Text>
           </Pressable>
         </Animated.View>
       )}
-
-      {/* Search */}
-      <View style={styles.searchRow}>
-        <Text style={styles.searchIcon}>🔍</Text>
-        <TextInput
-          style={styles.searchInput}
-          value={search}
-          onChangeText={setSearch}
-          placeholder="Search notes..."
-          placeholderTextColor={Colors.text.dim}
-        />
-        {search ? (
-          <Pressable onPress={() => setSearch('')} hitSlop={8}>
-            <Text style={styles.searchClear}>✕</Text>
-          </Pressable>
-        ) : null}
-      </View>
 
       {/* Notes List */}
       <FlatList
@@ -206,15 +199,28 @@ export default function NotesScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.cyan.primary} colors={[Colors.cyan.primary]} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={Colors.cyan.primary}
+            colors={[Colors.cyan.primary]}
+          />
         }
         ListEmptyComponent={
           <View style={styles.empty}>
             <Text style={styles.emptyIcon}>📋</Text>
-            <Text style={styles.emptyText}>{search ? `No notes matching "${search}"` : loading ? 'Loading...' : 'No notes yet'}</Text>
+            <Text style={styles.emptyText}>
+              {search
+                ? `No notes matching "${search}"`
+                : loading
+                ? 'Indexing Obsidian vault...'
+                : 'No notes found. Create a new note or connect PC.'}
+            </Text>
           </View>
         }
       />
+
+      <BottomTabBar />
     </SafeAreaView>
   );
 }
@@ -222,111 +228,26 @@ export default function NotesScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
 
-  header: {
+  actionStrip: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Theme.spacing.md,
-    paddingVertical: Theme.spacing.sm,
-    paddingTop: 28,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.surfaceBorder,
-    backgroundColor: Colors.background,
-    gap: Theme.spacing.sm,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    gap: 8,
   },
-  menuBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: Theme.radius.sm,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.surfaceBorder,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  menuIcon: { fontSize: 18, color: Colors.text.primary },
-  headerIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: Theme.radius.sm,
-    backgroundColor: Colors.cyan.glow,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerIconText: { fontSize: 18 },
-  headerTextCol: { flex: 1 },
-  headerTitle: {
-    fontFamily: 'JetBrains Mono, Menlo, monospace',
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.text.primary,
-  },
-  headerSub: {
-    fontFamily: 'JetBrains Mono, Menlo, monospace',
-    fontSize: 10,
-    color: Colors.text.secondary,
-    marginTop: 1,
-  },
-  addBtn: {
-    backgroundColor: Colors.cyan.primary,
-    borderRadius: 10,
-    width: 34,
-    height: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  addBtnText: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.background,
-  },
-
-  createSection: {
-    padding: Theme.spacing.md,
-    gap: Theme.spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.surfaceBorder,
-  },
-  createInput: {
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.surfaceBorder,
-    borderRadius: Theme.radius.sm,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontFamily: 'JetBrains Mono, Menlo, monospace',
-    fontSize: 13,
-    color: Colors.text.primary,
-  },
-  createContent: { minHeight: 80, textAlignVertical: 'top' },
-  createBtn: {
-    backgroundColor: Colors.cyan.primary,
-    borderRadius: Theme.radius.sm,
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  createBtnDisabled: { opacity: 0.4 },
-  createBtnText: {
-    fontFamily: 'JetBrains Mono, Menlo, monospace',
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.background,
-  },
-
   searchRow: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Theme.spacing.sm,
-    backgroundColor: Colors.surface,
-    borderRadius: Theme.radius.sm,
+    gap: 8,
+    backgroundColor: 'rgba(17, 16, 24, 0.75)',
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: Colors.surfaceBorder,
-    paddingHorizontal: Theme.spacing.md,
-    height: 36,
-    marginHorizontal: Theme.spacing.md,
-    marginTop: Theme.spacing.sm,
-    marginBottom: Theme.spacing.sm,
+    paddingHorizontal: 12,
+    height: 38,
   },
-  searchIcon: { fontSize: 14 },
+  searchIcon: { fontSize: 13 },
   searchInput: {
     flex: 1,
     fontFamily: 'JetBrains Mono, Menlo, monospace',
@@ -334,38 +255,85 @@ const styles = StyleSheet.create({
     color: Colors.text.primary,
     paddingVertical: 0,
   },
-  searchClear: {
-    fontSize: 14,
-    color: Colors.text.dim,
+  addBtn: {
+    backgroundColor: Colors.purple.primary,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addBtnText: {
+    fontFamily: 'JetBrains Mono, Menlo, monospace',
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+  },
+
+  createSection: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    padding: 14,
+    backgroundColor: 'rgba(17, 16, 24, 0.85)',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+    gap: 8,
+  },
+  createInput: {
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    fontFamily: 'JetBrains Mono, Menlo, monospace',
+    fontSize: 12,
+    color: Colors.text.primary,
+  },
+  createContent: { minHeight: 70, textAlignVertical: 'top' },
+  createBtn: {
+    backgroundColor: Colors.cyan.primary,
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  createBtnDisabled: { opacity: 0.4 },
+  createBtnText: {
+    fontFamily: 'JetBrains Mono, Menlo, monospace',
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.background,
+    letterSpacing: 1,
   },
 
   list: {
-    padding: Theme.spacing.md,
-    gap: Theme.spacing.sm,
-    paddingBottom: 40,
+    padding: 16,
+    gap: 8,
+    paddingBottom: 110,
   },
-
   noteCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Theme.spacing.md,
-    backgroundColor: Colors.surface,
-    borderRadius: Theme.radius.sm,
+    gap: 12,
+    backgroundColor: 'rgba(17, 16, 24, 0.75)',
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: Colors.surfaceBorder,
     paddingVertical: 12,
-    paddingHorizontal: Theme.spacing.md,
+    paddingHorizontal: 14,
   },
   noteIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: Theme.radius.sm,
-    backgroundColor: Colors.cyan.glow,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: 'rgba(106, 83, 153, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   noteIcon: { fontSize: 16 },
-  noteInfo: { flex: 1, gap: 1 },
+  noteInfo: { flex: 1, gap: 2 },
   noteTitle: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',
     fontSize: 13,
@@ -374,21 +342,23 @@ const styles = StyleSheet.create({
   },
   noteDate: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',
-    fontSize: 10,
+    fontSize: 9.5,
     color: Colors.text.dim,
   },
   noteChevron: {
     fontSize: 18,
     color: Colors.text.dim,
+    fontFamily: 'JetBrains Mono, Menlo, monospace',
   },
 
   detailScroll: { flex: 1 },
   detailCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Theme.radius.md,
+    backgroundColor: 'rgba(17, 16, 24, 0.85)',
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: Colors.surfaceBorder,
-    padding: Theme.spacing.md,
+    padding: 16,
+    marginBottom: 16,
   },
   detailContent: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',
@@ -396,21 +366,34 @@ const styles = StyleSheet.create({
     color: Colors.text.primary,
     lineHeight: 22,
   },
-  backBtn: { padding: 6, borderRadius: 8 },
-  backIcon: {
-    fontSize: 20,
-    color: Colors.cyan.primary,
+  closeBtn: {
+    backgroundColor: 'rgba(106, 83, 153, 0.2)',
+    borderWidth: 1,
+    borderColor: Colors.purple.primary,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: 100,
+  },
+  closeBtnText: {
+    fontFamily: 'JetBrains Mono, Menlo, monospace',
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.purple.light,
+    letterSpacing: 1,
   },
 
   empty: {
     alignItems: 'center',
-    paddingTop: 80,
-    gap: Theme.spacing.sm,
+    paddingTop: 70,
+    paddingHorizontal: 24,
+    gap: 8,
   },
-  emptyIcon: { fontSize: 36 },
+  emptyIcon: { fontSize: 32 },
   emptyText: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',
-    fontSize: 13,
+    fontSize: 12,
     color: Colors.text.dim,
+    textAlign: 'center',
   },
 });

@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, TextInput, Pressable, StyleSheet } from 'react-native';
+import { View, Text, TextInput, Pressable, StyleSheet, Platform } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -8,6 +8,7 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import * as Haptics from 'expo-haptics';
 import { Colors } from '../../constants/colors';
 import { Theme } from '../../constants/theme';
 
@@ -17,28 +18,40 @@ interface InputBarProps {
   onSend: () => void;
   isProcessing: boolean;
   orbState?: string;
+  onMicPress?: () => void;
 }
 
-export function InputBar({ value, onChangeText, onSend, isProcessing, orbState = 'idle' }: InputBarProps) {
+export function InputBar({
+  value,
+  onChangeText,
+  onSend,
+  isProcessing,
+  orbState = 'idle',
+  onMicPress,
+}: InputBarProps) {
   const borderOpacity = useSharedValue(0.3);
   const sendScale = useSharedValue(1);
 
   useEffect(() => {
     borderOpacity.value = withRepeat(
       withSequence(
-        withTiming(0.8, { duration: 2000 }),
-        withTiming(0.3, { duration: 2000 })
+        withTiming(0.8, { duration: 1800 }),
+        withTiming(0.3, { duration: 1800 })
       ),
-      -1, false
+      -1,
+      false
     );
   }, []);
 
   const glowBorderStyle = useAnimatedStyle(() => ({
-    borderColor: `rgba(0, 240, 255, ${borderOpacity.value})`,
-    shadowColor: Colors.cyan.primary,
+    borderColor:
+      orbState === 'listening'
+        ? Colors.cyan.primary
+        : `rgba(106, 83, 153, ${borderOpacity.value})`,
+    shadowColor: orbState === 'listening' ? Colors.cyan.primary : Colors.purple.primary,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: borderOpacity.value * 0.5,
-    shadowRadius: 8,
+    shadowOpacity: borderOpacity.value * 0.6,
+    shadowRadius: 10,
   }));
 
   const sendAnimStyle = useAnimatedStyle(() => ({
@@ -46,7 +59,10 @@ export function InputBar({ value, onChangeText, onSend, isProcessing, orbState =
   }));
 
   const handlePressIn = () => {
-    sendScale.value = withSpring(0.9, Theme.animation.spring);
+    sendScale.value = withSpring(0.88, Theme.animation.spring);
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch {}
   };
 
   const handlePressOut = () => {
@@ -54,36 +70,63 @@ export function InputBar({ value, onChangeText, onSend, isProcessing, orbState =
     onSend();
   };
 
+  const handleMic = () => {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch {}
+    onMicPress?.();
+  };
+
   const isActive = orbState === 'listening';
-  const inputBg = isActive ? 'rgba(0, 240, 255, 0.04)' : Colors.surface;
+  const hasText = Boolean(value.trim());
 
   return (
     <View style={styles.wrapper}>
-      <Animated.View style={[styles.container, { backgroundColor: inputBg }, glowBorderStyle]}>
+      <Animated.View
+        style={[
+          styles.container,
+          {
+            backgroundColor: isActive ? 'rgba(0, 240, 255, 0.05)' : 'rgba(18, 16, 26, 0.85)',
+          },
+          glowBorderStyle,
+        ]}
+      >
         <TextInput
           style={styles.input}
           value={value}
           onChangeText={onChangeText}
-          placeholder="Ask AURA anything..."
+          placeholder="Direct AURA or ask anything..."
           placeholderTextColor={Colors.text.dim}
           multiline={false}
           returnKeyType="send"
           onSubmitEditing={onSend}
           editable={!isProcessing}
         />
+
+        {/* Mic / Voice trigger */}
+        <Pressable
+          style={[styles.micBtn, isActive && styles.micBtnActive]}
+          onPress={handleMic}
+        >
+          <Text style={[styles.micIcon, isActive && { color: Colors.cyan.primary }]}>
+            {isActive ? '🔊' : '🎙️'}
+          </Text>
+        </Pressable>
+
+        {/* Send Button */}
         <Pressable
           onPressIn={handlePressIn}
           onPressOut={handlePressOut}
-          disabled={!value.trim() || isProcessing}
+          disabled={!hasText || isProcessing}
         >
           <Animated.View
             style={[
               styles.sendBtn,
-              (!value.trim() || isProcessing) && styles.sendBtnDisabled,
+              (!hasText || isProcessing) && styles.sendBtnDisabled,
               sendAnimStyle,
             ]}
           >
-            <View style={styles.sendArrow} />
+            <Text style={styles.sendArrow}>▲</Text>
           </Animated.View>
         </Pressable>
       </Animated.View>
@@ -93,47 +136,62 @@ export function InputBar({ value, onChangeText, onSend, isProcessing, orbState =
 
 const styles = StyleSheet.create({
   wrapper: {
-    paddingHorizontal: Theme.spacing.md,
-    paddingBottom: Theme.spacing.md,
-    paddingTop: Theme.spacing.sm,
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    paddingTop: 6,
   },
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.surfaceBorder,
-    borderRadius: Theme.radius.pill,
-    paddingHorizontal: Theme.spacing.md,
-    paddingVertical: Theme.spacing.sm,
-    gap: Theme.spacing.sm,
-    backgroundColor: 'rgba(17, 17, 24, 0.7)',
-  } as any,
+    borderWidth: 1.5,
+    borderRadius: 24,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    gap: 8,
+    elevation: 8,
+  },
   input: {
     flex: 1,
     ...Theme.typography.body,
+    fontSize: 14,
     color: Colors.text.primary,
-    paddingVertical: 4,
+    paddingVertical: 6,
   },
-  sendBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: Colors.cyan.primary,
+  micBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  micBtnActive: {
+    backgroundColor: 'rgba(0, 240, 255, 0.15)',
+    borderWidth: 1,
+    borderColor: Colors.cyan.primary,
+  },
+  micIcon: {
+    fontSize: 15,
+  },
+  sendBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: Colors.purple.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: Colors.purple.glow,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 6,
   },
   sendBtnDisabled: {
-    opacity: 0.3,
+    opacity: 0.35,
+    backgroundColor: Colors.surfaceElevated,
   },
   sendArrow: {
-    width: 0,
-    height: 0,
-    marginLeft: 2,
-    borderLeftWidth: 7,
-    borderRightWidth: 7,
-    borderBottomWidth: 10,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-    borderBottomColor: Colors.background,
+    fontSize: 11,
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
 });

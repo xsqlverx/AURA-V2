@@ -9,6 +9,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
 import { Colors } from '../../constants/colors';
 import { Theme } from '../../constants/theme';
 import { getOrbConfig } from './OrbStateMachine';
@@ -23,13 +24,18 @@ interface OrbProps {
 }
 
 function lightenColor(hex: string, amount: number): string {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  const nr = Math.min(255, r + amount);
-  const ng = Math.min(255, g + amount);
-  const nb = Math.min(255, b + amount);
-  return `#${nr.toString(16).padStart(2, '0')}${ng.toString(16).padStart(2, '0')}${nb.toString(16).padStart(2, '0')}`;
+  try {
+    if (!hex.startsWith('#') || hex.length < 7) return hex;
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    const nr = Math.min(255, r + amount);
+    const ng = Math.min(255, g + amount);
+    const nb = Math.min(255, b + amount);
+    return `#${nr.toString(16).padStart(2, '0')}${ng.toString(16).padStart(2, '0')}${nb.toString(16).padStart(2, '0')}`;
+  } catch {
+    return hex;
+  }
 }
 
 export function Orb({ state, onPress, size = Theme.orb.size }: OrbProps) {
@@ -37,7 +43,7 @@ export function Orb({ state, onPress, size = Theme.orb.size }: OrbProps) {
   const glowScale = useSharedValue(1);
   const glowOpacity = useSharedValue(config.glowIntensity);
   const orbScale = useSharedValue(1);
-  const coreOpacity = useSharedValue(1);
+  const ringRotation = useSharedValue(0);
 
   useEffect(() => {
     if (config.pulseSpeed === 0) {
@@ -48,20 +54,28 @@ export function Orb({ state, onPress, size = Theme.orb.size }: OrbProps) {
 
     glowScale.value = withRepeat(
       withSequence(
-        withTiming(1.15, { duration: config.pulseSpeed }),
+        withTiming(1.18, { duration: config.pulseSpeed }),
         withTiming(1.0, { duration: config.pulseSpeed })
       ),
-      -1, false
+      -1,
+      false
     );
 
     glowOpacity.value = withRepeat(
       withSequence(
-        withTiming(config.glowIntensity * 1.5, { duration: config.pulseSpeed }),
-        withTiming(config.glowIntensity * 0.6, { duration: config.pulseSpeed })
+        withTiming(Math.min(config.glowIntensity * 1.4, 1), { duration: config.pulseSpeed }),
+        withTiming(config.glowIntensity * 0.7, { duration: config.pulseSpeed })
       ),
-      -1, false
+      -1,
+      false
     );
-  }, [state, config.pulseSpeed, config.glowIntensity]);
+
+    ringRotation.value = withRepeat(
+      withTiming(360, { duration: config.ringSpeed || 6000 }),
+      -1,
+      false
+    );
+  }, [state, config.pulseSpeed, config.glowIntensity, config.ringSpeed]);
 
   const glowStyle = useAnimatedStyle(() => ({
     transform: [{ scale: glowScale.value }],
@@ -73,17 +87,23 @@ export function Orb({ state, onPress, size = Theme.orb.size }: OrbProps) {
   }));
 
   const haloStyle = useAnimatedStyle(() => ({
-    opacity: config.haloVisible ? withRepeat(
-      withSequence(
-        withTiming(0.3, { duration: 2000 }),
-        withTiming(0.1, { duration: 2000 })
-      ),
-      -1, false
-    ) : 0,
+    opacity: config.haloVisible
+      ? withRepeat(
+          withSequence(
+            withTiming(0.4, { duration: 1800 }),
+            withTiming(0.15, { duration: 1800 })
+          ),
+          -1,
+          false
+        )
+      : 0,
   }));
 
   const handlePressIn = () => {
-    orbScale.value = withSpring(0.92, Theme.animation.orbSpring);
+    orbScale.value = withSpring(0.9, Theme.animation.orbSpring);
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch {}
   };
 
   const handlePressOut = () => {
@@ -91,21 +111,21 @@ export function Orb({ state, onPress, size = Theme.orb.size }: OrbProps) {
     onPress?.();
   };
 
-  const glowSize = size * 2.5;
-  const lightColor = lightenColor(config.coreColor, 60);
+  const glowSize = size * 2.4;
+  const lightColor = lightenColor(config.coreColor, 50);
 
   return (
     <Pressable onPressIn={handlePressIn} onPressOut={handlePressOut}>
       <View style={[styles.container, { width: glowSize, height: glowSize }]}>
-        {/* Layer 1: Halo */}
+        {/* Layer 1: Ambient Halo */}
         {config.haloVisible && (
           <Animated.View
             style={[
               styles.halo,
               {
-                width: glowSize * 1.2,
-                height: glowSize * 1.2,
-                borderRadius: glowSize * 0.6,
+                width: glowSize * 1.15,
+                height: glowSize * 1.15,
+                borderRadius: (glowSize * 1.15) / 2,
                 backgroundColor: config.glowColor,
               },
               haloStyle,
@@ -113,7 +133,7 @@ export function Orb({ state, onPress, size = Theme.orb.size }: OrbProps) {
           />
         )}
 
-        {/* Layer 2: Glow */}
+        {/* Layer 2: Core Glow Matrix */}
         <Animated.View
           style={[
             styles.glow,
@@ -127,55 +147,78 @@ export function Orb({ state, onPress, size = Theme.orb.size }: OrbProps) {
           ]}
         />
 
-        {/* Layer 3: Rings */}
+        {/* Layer 3: Rotating Orbital Rings */}
         <OrbRings
           count={config.ringCount}
-          color={config.coreColor}
+          color={config.ringColor || config.coreColor}
           size={size}
           speed={config.ringSpeed}
         />
 
-        {/* Layer 4: Particles */}
+        {/* Layer 4: Floating / Orbiting Energy Particles */}
         <OrbParticles
           count={config.particleCount}
-          mode={config.particleMode}
-          color={config.coreColor}
+          mode={config.particleMode === 'pulse' ? 'orbit' : config.particleMode}
+          color={config.particleColor || config.coreColor}
           size={size}
           speed={config.pulseSpeed}
         />
 
-        {/* Layer 5: Core */}
+        {/* Layer 5: Holographic Sphere Core */}
         <Animated.View style={[styles.orbWrapper, orbStyle]}>
           <LinearGradient
-            colors={[lightColor, config.coreColor, config.glowColor]}
-            start={{ x: 0.2, y: 0 }}
-            end={{ x: 0.8, y: 1 }}
+            colors={[
+              lightColor,
+              config.coreColor,
+              Colors.purple.dark,
+              '#050308',
+            ]}
+            start={{ x: 0.25, y: 0.1 }}
+            end={{ x: 0.85, y: 0.95 }}
             style={[
               styles.orb,
               {
                 width: size,
                 height: size,
                 borderRadius: size / 2,
+                borderWidth: 1.5,
+                borderColor: 'rgba(255, 255, 255, 0.25)',
                 shadowColor: config.coreColor,
                 shadowOffset: { width: 0, height: 0 },
-                shadowOpacity: 0.6,
-                shadowRadius: 20,
-                elevation: 12,
+                shadowOpacity: 0.8,
+                shadowRadius: 24,
+                elevation: 16,
               },
             ]}
           />
         </Animated.View>
 
-        {/* Inner highlight */}
+        {/* Layer 6: Glass Reflection Arc */}
         <View
           style={[
             styles.innerHighlight,
             {
-              width: size * 0.5,
-              height: size * 0.5,
-              borderRadius: size * 0.25,
-              top: (glowSize - size * 0.5) / 2 - size * 0.12,
-              left: (glowSize - size * 0.5) / 2 + size * 0.08,
+              width: size * 0.45,
+              height: size * 0.45,
+              borderRadius: (size * 0.45) / 2,
+              top: (glowSize - size) / 2 + size * 0.08,
+              left: (glowSize - size) / 2 + size * 0.12,
+            },
+          ]}
+        />
+
+        {/* Layer 7: Cyber Energy Dot in Center */}
+        <View
+          style={[
+            styles.centerSpark,
+            {
+              width: size * 0.14,
+              height: size * 0.14,
+              borderRadius: (size * 0.14) / 2,
+              backgroundColor: '#FFFFFF',
+              shadowColor: Colors.cyan.primary,
+              shadowOpacity: 1,
+              shadowRadius: 8,
             },
           ]}
         />
@@ -191,11 +234,11 @@ const styles = StyleSheet.create({
   },
   halo: {
     position: 'absolute',
-    opacity: 0.15,
+    opacity: 0.18,
   },
   glow: {
     position: 'absolute',
-    opacity: 0.3,
+    opacity: 0.35,
   },
   orbWrapper: {
     justifyContent: 'center',
@@ -204,6 +247,13 @@ const styles = StyleSheet.create({
   orb: {},
   innerHighlight: {
     position: 'absolute',
-    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.45)',
+  },
+  centerSpark: {
+    position: 'absolute',
+    opacity: 0.85,
   },
 });

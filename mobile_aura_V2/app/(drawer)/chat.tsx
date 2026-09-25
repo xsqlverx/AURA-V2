@@ -9,11 +9,13 @@ import {
   StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useNavigation } from 'expo-router';
+import * as Haptics from 'expo-haptics';
 import { Orb } from '../../src/components/orb/Orb';
 import { MessageBubble } from '../../src/components/chat/MessageBubble';
 import { InputBar } from '../../src/components/chat/InputBar';
 import { ParticleBackground } from '../../src/components/effects/ParticleBackground';
+import { TopHudBar } from '../../src/components/navigation/TopHudBar';
+import { BottomTabBar } from '../../src/components/navigation/BottomTabBar';
 import { Toast } from '../../src/components/shared/Toast';
 import { useAppStore } from '../../src/store/appStore';
 import { useSettingsStore } from '../../src/store/settingsStore';
@@ -34,8 +36,6 @@ export default function ChatScreen() {
   const [streamingText, setStreamingText] = useState('');
   const flatListRef = useRef<FlatList>(null);
   const abortRef = useRef<(() => void) | null>(null);
-  const lastPcState = useRef<boolean | null>(null);
-  const navigation = useNavigation();
 
   const {
     orbState,
@@ -48,32 +48,13 @@ export default function ChatScreen() {
     setIsProcessing,
   } = useAppStore();
 
-  const { openrouterApiKey } = useSettingsStore();
-  const needleReadyRef = useRef(false);
+  const { activeProvider } = useSettingsStore();
 
   useEffect(() => {
     initNeedle().then((ok) => {
-      needleReadyRef.current = ok;
-      devLog.info(`Needle init: ${ok ? 'ready' : 'fallback to keywords'}`);
-      if (!ok) showToast('On-device router unavailable, using keywords', 'info');
+      devLog.info(`Needle SLM router status: ${ok ? 'ready' : 'using keyword fallback'}`);
     });
-  }, []);
-
-  useEffect(() => {
-    const check = async () => {
-      const connected = await checkPcConnection();
-      if (lastPcState.current !== null && lastPcState.current !== connected) {
-        showToast(
-          connected ? 'PC connected' : 'PC not reachable',
-          connected ? 'success' : 'error'
-        );
-      }
-      lastPcState.current = connected;
-      setPcConnected(connected);
-    };
-    check();
-    const interval = setInterval(check, 15000);
-    return () => clearInterval(interval);
+    checkPcConnection().then((ok) => setPcConnected(ok));
   }, []);
 
   const showToast = (message: string, type: 'error' | 'info' | 'success' = 'error') => {
@@ -97,19 +78,16 @@ export default function ChatScreen() {
     setStreamingText('');
 
     try {
-      // Needle try first with needleSupported + ungroundedFields gating, then fallback to keywords at chat.tsx:90
+      // 1. Check Needle SLM router or Keyword classification for on-device mobile tasks
       let route = null as ReturnType<typeof classifyMessage> | null;
       try {
         const needleRoute = await tryNeedleRoute(text);
         if (needleRoute) {
           route = needleRoute;
-          devLog.info('Routed via Needle', route);
         } else {
           route = keywordClassify(text);
-          devLog.info('Needle declined/unsupported, fallback to keyword', route);
         }
       } catch (e) {
-        devLog.warn('Needle routing error, fallback', e);
         route = classifyMessage(text);
       }
 
@@ -147,26 +125,17 @@ export default function ChatScreen() {
             routedTo: 'PC',
           };
           addMessage(reply);
+          setOrbState('idle');
+          setIsProcessing(false);
         } catch (err) {
-          showToast('Could not reach PC. Try again.');
-          devLog.error('PC capability failed', err);
+          showToast('PC command timeout. Try again.');
+          setOrbState('idle');
+          setIsProcessing(false);
         }
       } else {
-        if (!openrouterApiKey) {
-          showToast('No API key. Go to Settings to configure OpenRouter.');
-          const reply: Message = {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: 'I need an OpenRouter API key to respond. Open the drawer and go to Settings.',
-            timestamp: Date.now(),
-            routedTo: 'CHAT',
-          };
-          addMessage(reply);
-          return;
-        }
-
+        // Conversational LLM brain
         setOrbState('thinking');
-        const history = messages.slice(-10).map((m) => ({
+        const history = messages.slice(-8).map((m) => ({
           role: m.role,
           content: m.content,
         }));
@@ -183,7 +152,7 @@ export default function ChatScreen() {
               const reply: Message = {
                 id: (Date.now() + 1).toString(),
                 role: 'assistant',
-                content: fullText || 'No response received.',
+                content: fullText || 'Directive received.',
                 timestamp: Date.now(),
                 routedTo: 'CHAT',
               };
@@ -196,21 +165,21 @@ export default function ChatScreen() {
             },
             onError: (err) => {
               setStreamingText('');
-              showToast(err.message || 'Failed to get response.');
-              devLog.error('OpenRouter stream error', err);
-              setOrbState('idle');
+              showToast(err.message || 'Stream connection error.');
+              setOrbState('error');
+              setTimeout(() => setOrbState('idle'), 2000);
+              setIsProcessing(false);
             },
           }
         );
         abortRef.current = abort;
       }
-    } finally {
-      if (!streamingText) {
-        setOrbState('idle');
-        setIsProcessing(false);
-      }
+    } catch (e: any) {
+      setOrbState('idle');
+      setIsProcessing(false);
+      showToast(e?.message || 'Processing fault.');
     }
-  }, [inputText, isProcessing, pcConnected, messages, openrouterApiKey]);
+  }, [inputText, isProcessing, pcConnected, messages]);
 
   const handleStop = useCallback(() => {
     abortRef.current?.();
@@ -231,6 +200,18 @@ export default function ChatScreen() {
     setIsProcessing(false);
   }, [streamingText]);
 
+  const toggleVoiceMode = () => {
+    if (orbState === 'listening') {
+      setOrbState('idle');
+      stopSpeaking();
+    } else {
+      setOrbState('listening');
+      try {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      } catch {}
+    }
+  };
+
   const renderMessage = ({ item }: { item: Message }) => (
     <MessageBubble message={item} />
   );
@@ -238,31 +219,15 @@ export default function ChatScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <ParticleBackground />
+      <TopHudBar title="AURA" subtitle="NEURAL STREAM // ACTIVE" />
 
-      {/* Header with hamburger + settings */}
-      <View style={styles.header}>
-        <Pressable
-          style={styles.menuBtn}
-          onPress={() => navigation.dispatch({ type: 'OPEN_DRAWER' })}
-        >
-          <Text style={styles.menuIcon}>☰</Text>
-        </Pressable>
-        <Text style={styles.headerTitle}>AURA</Text>
-        <Pressable
-          style={styles.settingsBtn}
-          onPress={() => router.push('/settings')}
-        >
-          <Text style={styles.settingsIcon}>⚙</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.orbArea}>
-        <Orb state={orbState} onPress={() => setOrbState('listening')} />
-        {orbState !== 'idle' && (
-          <View style={styles.stateIndicator}>
-            <Text style={styles.stateText}>{orbState.toUpperCase()}</Text>
-          </View>
-        )}
+      {/* Floating Compact Orb Indicator */}
+      <View style={styles.orbStrip}>
+        <Orb state={orbState} size={54} onPress={toggleVoiceMode} />
+        <View style={styles.stateTag}>
+          <Text style={styles.stateTagText}>{orbState.toUpperCase()}</Text>
+          <Text style={styles.stateTagSub}>TAP ORB TO TOGGLE VOICE</Text>
+        </View>
       </View>
 
       <KeyboardAvoidingView
@@ -276,7 +241,7 @@ export default function ChatScreen() {
           renderItem={renderMessage}
           contentContainerStyle={styles.messageList}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-          ListEmptyComponent={<EmptyState />}
+          ListEmptyComponent={<EmptyChatState />}
           ListFooterComponent={
             streamingText ? (
               <View style={styles.streamingContainer}>
@@ -286,6 +251,7 @@ export default function ChatScreen() {
                     role: 'assistant',
                     content: streamingText,
                     timestamp: Date.now(),
+                    routedTo: 'CHAT',
                   }}
                 />
               </View>
@@ -295,9 +261,9 @@ export default function ChatScreen() {
 
         {isProcessing && streamingText ? (
           <View style={styles.stopBar}>
-            <Text style={styles.thinkingText}>Thinking</Text>
+            <Text style={styles.thinkingText}>Streaming response</Text>
             <Pressable style={styles.stopBtn} onPress={handleStop}>
-              <View style={styles.stopIcon} />
+              <Text style={styles.stopBtnText}>◼ STOP</Text>
             </Pressable>
           </View>
         ) : null}
@@ -308,8 +274,13 @@ export default function ChatScreen() {
           onSend={handleSend}
           isProcessing={isProcessing}
           orbState={orbState}
+          onMicPress={toggleVoiceMode}
         />
+
+        <View style={{ height: 75 }} />
       </KeyboardAvoidingView>
+
+      <BottomTabBar />
 
       <Toast
         message={toast.message}
@@ -321,11 +292,24 @@ export default function ChatScreen() {
   );
 }
 
-function EmptyState() {
+function EmptyChatState() {
   return (
     <View style={styles.emptyState}>
-      <Text style={styles.emptyText}>Ask AURA anything.</Text>
-      <Text style={styles.emptySubtext}>Talk, tap, or glance.</Text>
+      <View style={styles.emptyIconBox}>
+        <Text style={styles.emptyIcon}>🟣</Text>
+      </View>
+      <Text style={styles.emptyTitle}>AURA Neural Copilot</Text>
+      <Text style={styles.emptySubtitle}>
+        Ask questions, trigger phone actions, or direct PC workflows.
+      </Text>
+      <View style={styles.hintsRow}>
+        <View style={styles.hintChip}>
+          <Text style={styles.hintText}>"Open WhatsApp"</Text>
+        </View>
+        <View style={styles.hintChip}>
+          <Text style={styles.hintText}>"Check battery status"</Text>
+        </View>
+      </View>
     </View>
   );
 }
@@ -337,106 +321,123 @@ const styles = StyleSheet.create({
   },
   flex: { flex: 1 },
 
-  header: {
+  orbStrip: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Theme.spacing.md,
-    height: 56,
-    backgroundColor: 'rgba(10, 10, 15, 0.8)',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(17, 16, 24, 0.4)',
     borderBottomWidth: 1,
-    borderBottomColor: Colors.surfaceBorder,
+    borderBottomColor: 'rgba(106, 83, 153, 0.15)',
+    gap: 12,
   },
-  menuBtn: {
-    padding: Theme.spacing.sm,
+  stateTag: {
+    gap: 2,
   },
-  menuIcon: {
-    fontSize: 20,
-    color: Colors.text.primary,
-  },
-  headerTitle: {
+  stateTagText: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',
-    fontSize: 16,
+    fontSize: 10,
     fontWeight: '700',
-    letterSpacing: 4,
     color: Colors.cyan.primary,
+    letterSpacing: 1,
   },
-  settingsBtn: {
-    padding: Theme.spacing.sm,
-  },
-  settingsIcon: {
-    fontSize: 18,
-    color: Colors.text.secondary,
-  },
-
-  orbArea: {
-    alignItems: 'center',
-    paddingVertical: Theme.spacing.lg,
-    gap: Theme.spacing.sm,
-  },
-  stateIndicator: {
-    paddingHorizontal: Theme.spacing.sm + 2,
-    paddingVertical: 2,
-    backgroundColor: Colors.cyan.glow,
-    borderRadius: 4,
-  },
-  stateText: {
-    ...Theme.typography.hud,
-    fontSize: 9,
-    color: Colors.cyan.primary,
+  stateTagSub: {
+    fontFamily: 'JetBrains Mono, Menlo, monospace',
+    fontSize: 8,
+    color: Colors.text.dim,
+    letterSpacing: 0.5,
   },
 
   messageList: {
-    padding: Theme.spacing.md,
-    paddingBottom: Theme.spacing.sm,
-    gap: Theme.spacing.xs,
+    padding: 16,
+    paddingBottom: 20,
   },
-
   streamingContainer: {
-    opacity: 0.9,
+    opacity: 0.95,
   },
 
   stopBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: Theme.spacing.md,
-    paddingVertical: Theme.spacing.xs,
-    gap: Theme.spacing.sm,
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.25)',
+    marginHorizontal: 16,
+    marginBottom: 6,
+    borderRadius: 12,
   },
   thinkingText: {
-    ...Theme.typography.mono,
-    fontSize: 11,
-    color: Colors.text.dim,
+    fontFamily: 'JetBrains Mono, Menlo, monospace',
+    fontSize: 10,
+    color: Colors.red.bright,
   },
   stopBtn: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
     backgroundColor: Colors.red.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  stopIcon: {
-    width: 8,
-    height: 8,
-    borderRadius: 2,
-    backgroundColor: Colors.background,
+  stopBtnText: {
+    fontFamily: 'JetBrains Mono, Menlo, monospace',
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
 
   emptyState: {
-    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingTop: 80,
-    gap: Theme.spacing.xs,
+    paddingHorizontal: 24,
+    gap: 8,
   },
-  emptyText: {
-    ...Theme.typography.body,
-    color: Colors.text.secondary,
+  emptyIconBox: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(106, 83, 153, 0.2)',
+    borderWidth: 1,
+    borderColor: Colors.purple.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
   },
-  emptySubtext: {
-    ...Theme.typography.mono,
+  emptyIcon: {
+    fontSize: 26,
+  },
+  emptyTitle: {
+    fontFamily: 'JetBrains Mono, Menlo, monospace',
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.text.primary,
+    letterSpacing: 1,
+  },
+  emptySubtitle: {
+    fontSize: 12,
     color: Colors.text.dim,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  hintsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+  },
+  hintChip: {
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  hintText: {
+    fontFamily: 'JetBrains Mono, Menlo, monospace',
+    fontSize: 10,
+    color: Colors.cyan.primary,
   },
 });

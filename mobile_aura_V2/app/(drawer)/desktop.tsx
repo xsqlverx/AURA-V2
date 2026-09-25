@@ -3,21 +3,30 @@ import {
   View,
   Text,
   ScrollView,
-  Pressable,
   RefreshControl,
   StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from 'expo-router';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { Colors } from '../../src/constants/colors';
 import { Theme } from '../../src/constants/theme';
-import { getStats, getHealth, getNowPlaying, getFocus, type SystemStats, type MediaInfo, type FocusInfo } from '../../src/api/client';
+import { TopHudBar } from '../../src/components/navigation/TopHudBar';
+import { BottomTabBar } from '../../src/components/navigation/BottomTabBar';
+import { ParticleBackground } from '../../src/components/effects/ParticleBackground';
+import {
+  getStats,
+  getHealth,
+  getNowPlaying,
+  getFocus,
+  type SystemStats,
+  type MediaInfo,
+  type FocusInfo,
+} from '../../src/api/client';
 import { useAppStore } from '../../src/store/appStore';
 
 function useMetricColor(value: number, warn = 50, danger = 80): string {
   if (value > danger) return Colors.red.primary;
-  if (value > warn) return Colors.amber.primary;
+  if (value > warn) return Colors.gold.primary;
   return Colors.cyan.primary;
 }
 
@@ -28,12 +37,25 @@ function formatUptime(seconds: number): string {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
-function MetricCard({ label, value, unit, color, delay }: {
-  label: string; value: string; unit: string; color: string; delay: number;
+function MetricCard({
+  label,
+  value,
+  unit,
+  color,
+  delay,
+}: {
+  label: string;
+  value: string;
+  unit: string;
+  color: string;
+  delay: number;
 }) {
   return (
-    <Animated.View entering={FadeInDown.duration(300).delay(delay)} style={metricStyles.card}>
-      <Text style={[metricStyles.value, { color }]}>{value}<Text style={metricStyles.unit}>{unit}</Text></Text>
+    <Animated.View entering={FadeInDown.duration(280).delay(delay)} style={metricStyles.card}>
+      <Text style={[metricStyles.value, { color }]}>
+        {value}
+        <Text style={metricStyles.unit}>{unit}</Text>
+      </Text>
       <Text style={metricStyles.label}>{label}</Text>
     </Animated.View>
   );
@@ -43,13 +65,13 @@ const metricStyles = StyleSheet.create({
   card: {
     flex: 1,
     minWidth: '45%',
-    backgroundColor: Colors.surface,
-    borderRadius: Theme.radius.md,
+    backgroundColor: 'rgba(17, 16, 24, 0.75)',
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: Colors.surfaceBorder,
-    padding: Theme.spacing.md,
+    padding: 14,
     alignItems: 'center',
-    gap: Theme.spacing.xs,
+    gap: 4,
   },
   value: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',
@@ -62,11 +84,12 @@ const metricStyles = StyleSheet.create({
     color: Colors.text.dim,
   },
   label: {
-    fontSize: 10,
-    fontWeight: '600',
+    fontFamily: 'JetBrains Mono, Menlo, monospace',
+    fontSize: 9.5,
+    fontWeight: '700',
     color: Colors.text.secondary,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 1,
   },
 });
 
@@ -76,8 +99,7 @@ export default function DesktopScreen() {
   const [focus, setFocus] = useState<FocusInfo | null>(null);
   const [uptime, setUptime] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
-  const navigation = useNavigation();
-  const { pcConnected } = useAppStore();
+  const { pcConnected, setPcConnected } = useAppStore();
 
   const fetchAll = useCallback(async () => {
     const [s, h, m, f] = await Promise.all([
@@ -86,7 +108,12 @@ export default function DesktopScreen() {
       getNowPlaying(),
       getFocus(),
     ]);
-    if (s) setStats(s);
+    if (s) {
+      setStats(s);
+      setPcConnected(true);
+    } else {
+      setPcConnected(false);
+    }
     if (h) setUptime(h.uptime_seconds);
     if (m) setMedia(m);
     if (f) setFocus(f);
@@ -104,8 +131,6 @@ export default function DesktopScreen() {
     setRefreshing(false);
   }, [fetchAll]);
 
-  const connColor = pcConnected ? Colors.green.primary : Colors.red.primary;
-  const connLabel = pcConnected ? 'Connected' : 'Disconnected';
   const uptimeStr = formatUptime(uptime);
 
   const cpuColor = useMetricColor(stats?.cpu_percent ?? 0, 50, 80);
@@ -115,301 +140,273 @@ export default function DesktopScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Pressable
-          style={styles.menuBtn}
-          onPress={() => navigation.dispatch({ type: 'OPEN_DRAWER' })}
-        >
-          <Text style={styles.menuIcon}>☰</Text>
-        </Pressable>
-        <View style={styles.headerIconWrap}>
-          <Text style={styles.headerIconText}>📊</Text>
-        </View>
-        <View style={styles.headerTextCol}>
-          <Text style={styles.headerTitle}>Desktop Status</Text>
-          {uptimeStr ? <Text style={styles.headerSub}>Up {uptimeStr}</Text> : null}
-        </View>
-      </View>
+      <ParticleBackground />
+      <TopHudBar title="PC TELEMETRY" subtitle={uptimeStr ? `UPTIME: ${uptimeStr}` : 'WINDOWS DAEMON LINK'} />
 
       <ScrollView
         style={styles.scroll}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.cyan.primary} colors={[Colors.cyan.primary]} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={Colors.cyan.primary}
+            colors={[Colors.cyan.primary]}
+          />
         }
       >
-        {/* Connection Status */}
-        <View style={styles.connRow}>
-          <View style={[styles.connDot, { backgroundColor: connColor }]} />
-          <Text style={[styles.connLabel, { color: connColor }]}>{connLabel}</Text>
+        {/* Connection Status Card */}
+        <View style={styles.connCard}>
+          <View style={styles.connLeft}>
+            <View
+              style={[
+                styles.connDot,
+                { backgroundColor: pcConnected ? Colors.green.primary : Colors.red.primary },
+              ]}
+            />
+            <View>
+              <Text style={styles.connTitle}>
+                {pcConnected ? 'WINDOWS DESKTOP // ONLINE' : 'PC OFFLINE // UNREACHABLE'}
+              </Text>
+              <Text style={styles.connSub}>
+                {pcConnected
+                  ? 'Port 8000 & TCP Socket Bridge Connected'
+                  : 'Start backend on PC (python main.py)'}
+              </Text>
+            </View>
+          </View>
         </View>
 
         {/* Focus App */}
         {focus && (
-          <Animated.View entering={FadeInDown.duration(300).delay(50)} style={styles.focusCard}>
+          <Animated.View entering={FadeInDown.duration(280).delay(50)} style={styles.focusCard}>
             <Text style={styles.focusIcon}>💻</Text>
             <View style={styles.focusInfo}>
-              <Text style={styles.focusLabel}>Focus App</Text>
-              <Text style={styles.focusApp} numberOfLines={1}>{focus.app}</Text>
+              <Text style={styles.focusLabel}>ACTIVE FOREGROUND WINDOW</Text>
+              <Text style={styles.focusApp} numberOfLines={1}>
+                {focus.app}
+              </Text>
+              {focus.window_title ? (
+                <Text style={styles.focusWindow} numberOfLines={1}>
+                  {focus.window_title}
+                </Text>
+              ) : null}
             </View>
-            {focus.window_title ? (
-              <Text style={styles.focusWindow} numberOfLines={1}>{focus.window_title}</Text>
-            ) : null}
           </Animated.View>
         )}
 
         {/* Metrics Grid */}
+        <Text style={styles.sectionHeader}>HARDWARE VITALS</Text>
         <View style={styles.metricsGrid}>
-          <MetricCard label="CPU" value={`${stats?.cpu_percent ?? '--'}`} unit="%" color={cpuColor} delay={100} />
-          <MetricCard label="RAM" value={`${stats?.memory_percent ?? '--'}`} unit="%" color={ramColor} delay={130} />
-          <MetricCard label="Disk" value={`${stats?.disk_percent ?? '--'}`} unit="%" color={diskColor} delay={160} />
+          <MetricCard
+            label="CPU LOAD"
+            value={`${stats?.cpu_percent ?? '--'}`}
+            unit="%"
+            color={cpuColor}
+            delay={80}
+          />
+          <MetricCard
+            label="RAM USAGE"
+            value={`${stats?.memory_percent ?? '--'}`}
+            unit="%"
+            color={ramColor}
+            delay={110}
+          />
+          <MetricCard
+            label="DISK OCCUPANCY"
+            value={`${stats?.disk_percent ?? '--'}`}
+            unit="%"
+            color={diskColor}
+            delay={140}
+          />
           {stats?.gpu_percent != null && (
-            <MetricCard label="GPU" value={`${stats.gpu_percent}`} unit="%" color={gpuColor} delay={190} />
+            <MetricCard
+              label="GPU LOAD"
+              value={`${stats.gpu_percent}`}
+              unit="%"
+              color={gpuColor}
+              delay={170}
+            />
           )}
         </View>
 
-        {/* RAM Detail */}
+        {/* RAM Detail Breakdown */}
         {stats?.memory_used_gb != null && stats?.memory_total_gb != null && (
-          <Animated.View entering={FadeInDown.duration(300).delay(200)} style={styles.detailCard}>
-            <Text style={styles.detailLabel}>Memory</Text>
-            <Text style={styles.detailValue}>{stats.memory_used_gb.toFixed(1)} / {stats.memory_total_gb.toFixed(1)} GB</Text>
+          <Animated.View entering={FadeInDown.duration(280).delay(180)} style={styles.detailCard}>
+            <Text style={styles.detailLabel}>PHYSICAL MEMORY BREAKDOWN</Text>
+            <Text style={styles.detailValue}>
+              {stats.memory_used_gb.toFixed(1)} GB / {stats.memory_total_gb.toFixed(1)} GB
+            </Text>
           </Animated.View>
         )}
 
-        {/* Battery */}
-        {stats?.battery && (
-          <Animated.View entering={FadeInDown.duration(300).delay(220)} style={styles.batteryCard}>
-            <View style={styles.batteryHeader}>
-              <Text style={styles.batteryLabel}>Battery</Text>
-              <Text style={[styles.batteryPercent, {
-                color: stats.battery.percent < 20 ? Colors.red.primary : Colors.green.primary
-              }]}>
-                {stats.battery.percent}%{stats.battery.charging ? ' ⚡' : ''}
-              </Text>
-            </View>
-            <View style={styles.batteryBar}>
-              <View style={[
-                styles.batteryFill,
-                {
-                  width: `${Math.min(stats.battery.percent, 100)}%`,
-                  backgroundColor: stats.battery.percent < 20 ? Colors.red.primary : stats.battery.charging ? Colors.cyan.primary : Colors.green.primary,
-                },
-              ]} />
-            </View>
-            {stats.battery.time_remaining ? (
-              <Text style={styles.batteryTime}>{stats.battery.time_remaining} remaining</Text>
-            ) : null}
-          </Animated.View>
-        )}
-
-        {/* Now Playing */}
+        {/* Now Playing Telemetry */}
         {media?.title && (
-          <Animated.View entering={FadeInDown.duration(300).delay(250)} style={styles.mediaCard}>
-            <Text style={styles.mediaIcon}>🎵</Text>
-            <View style={styles.mediaInfo}>
-              <Text style={styles.mediaTitle} numberOfLines={1}>{media.title}</Text>
-              {media.artist ? <Text style={styles.mediaArtist} numberOfLines={1}>{media.artist}</Text> : null}
+          <Animated.View entering={FadeInDown.duration(280).delay(220)} style={styles.mediaCard}>
+            <View style={styles.mediaIconBox}>
+              <Text style={styles.mediaIcon}>🎵</Text>
             </View>
-            {media.is_playing ? <Text style={styles.mediaPlaying}>NOW PLAYING</Text> : null}
+            <View style={styles.mediaInfo}>
+              <Text style={styles.mediaPlayingTag}>NOW PLAYING</Text>
+              <Text style={styles.mediaTitle} numberOfLines={1}>
+                {media.title}
+              </Text>
+              {media.artist ? (
+                <Text style={styles.mediaArtist} numberOfLines={1}>
+                  {media.artist}
+                </Text>
+              ) : null}
+            </View>
           </Animated.View>
         )}
 
-        <View style={{ height: 40 }} />
+        <View style={{ height: 110 }} />
       </ScrollView>
+
+      <BottomTabBar />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  scroll: { flex: 1, paddingHorizontal: Theme.spacing.md },
+  scroll: { flex: 1, padding: 16 },
 
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: Theme.spacing.md,
-    paddingVertical: Theme.spacing.sm,
-    paddingTop: 28,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.surfaceBorder,
-    backgroundColor: Colors.background,
-    gap: Theme.spacing.sm,
-  },
-  menuBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: Theme.radius.sm,
-    backgroundColor: Colors.surface,
+  connCard: {
+    backgroundColor: 'rgba(17, 16, 24, 0.75)',
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: Colors.surfaceBorder,
-    alignItems: 'center',
-    justifyContent: 'center',
+    padding: 14,
+    marginBottom: 12,
   },
-  menuIcon: { fontSize: 18, color: Colors.text.primary },
-  headerIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: Theme.radius.sm,
-    backgroundColor: Colors.cyan.glow,
+  connLeft: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 10,
   },
-  headerIconText: { fontSize: 18 },
-  headerTextCol: { flex: 1 },
-  headerTitle: {
+  connDot: { width: 8, height: 8, borderRadius: 4 },
+  connTitle: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',
-    fontSize: 14,
+    fontSize: 11.5,
     fontWeight: '700',
     color: Colors.text.primary,
   },
-  headerSub: {
+  connSub: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',
-    fontSize: 10,
-    color: Colors.text.secondary,
-    marginTop: 1,
-  },
-
-  connRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Theme.spacing.sm,
-    paddingVertical: Theme.spacing.md,
-  },
-  connDot: { width: 6, height: 6, borderRadius: 3 },
-  connLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    fontSize: 9.5,
+    color: Colors.text.dim,
+    marginTop: 2,
   },
 
   focusCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Theme.spacing.md,
-    backgroundColor: Colors.surface,
-    borderRadius: Theme.radius.md,
+    gap: 12,
+    backgroundColor: 'rgba(17, 16, 24, 0.75)',
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: Colors.surfaceBorder,
-    padding: Theme.spacing.md,
-    marginBottom: Theme.spacing.md,
+    padding: 14,
+    marginBottom: 12,
   },
-  focusIcon: { fontSize: 18 },
-  focusInfo: { gap: 1, flex: 1 },
+  focusIcon: { fontSize: 20 },
+  focusInfo: { gap: 2, flex: 1 },
   focusLabel: {
-    fontSize: 9,
-    fontWeight: '600',
-    color: Colors.text.dim,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    fontFamily: 'JetBrains Mono, Menlo, monospace',
+    fontSize: 8.5,
+    fontWeight: '700',
+    color: Colors.cyan.primary,
+    letterSpacing: 0.8,
   },
   focusApp: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
     color: Colors.text.primary,
   },
   focusWindow: {
     fontSize: 11,
-    color: Colors.text.secondary,
-    flexShrink: 1,
+    color: Colors.text.dim,
+  },
+
+  sectionHeader: {
+    fontFamily: 'JetBrains Mono, Menlo, monospace',
+    fontSize: 9.5,
+    fontWeight: '700',
+    color: Colors.text.dim,
+    letterSpacing: 1.5,
+    marginBottom: 8,
+    paddingHorizontal: 2,
   },
 
   metricsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: Theme.spacing.sm,
-    marginBottom: Theme.spacing.md,
+    gap: 10,
+    marginBottom: 12,
   },
 
   detailCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Theme.radius.md,
+    backgroundColor: 'rgba(17, 16, 24, 0.75)',
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: Colors.surfaceBorder,
-    padding: Theme.spacing.md,
-    marginBottom: Theme.spacing.sm,
+    padding: 14,
+    marginBottom: 10,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   detailLabel: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',
-    fontSize: 12,
+    fontSize: 9.5,
     color: Colors.text.secondary,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   detailValue: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',
-    fontSize: 13,
-    fontWeight: '700',
-    color: Colors.text.primary,
-  },
-
-  batteryCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Theme.radius.md,
-    borderWidth: 1,
-    borderColor: Colors.surfaceBorder,
-    padding: Theme.spacing.md,
-    marginBottom: Theme.spacing.sm,
-    gap: Theme.spacing.sm,
-  },
-  batteryHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  batteryLabel: {
-    fontFamily: 'JetBrains Mono, Menlo, monospace',
     fontSize: 12,
-    fontWeight: '600',
-    color: Colors.text.primary,
-  },
-  batteryPercent: {
-    fontFamily: 'JetBrains Mono, Menlo, monospace',
-    fontSize: 13,
     fontWeight: '700',
-  },
-  batteryBar: {
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    overflow: 'hidden',
-  },
-  batteryFill: { height: '100%', borderRadius: 2 },
-  batteryTime: {
-    fontSize: 10,
-    color: Colors.text.dim,
+    color: Colors.purple.soft,
   },
 
   mediaCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Theme.spacing.md,
-    backgroundColor: Colors.surface,
-    borderRadius: Theme.radius.md,
+    gap: 12,
+    backgroundColor: 'rgba(17, 16, 24, 0.75)',
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: Colors.surfaceBorder,
-    padding: Theme.spacing.md,
-    marginBottom: Theme.spacing.sm,
+    borderColor: 'rgba(106, 83, 153, 0.35)',
+    padding: 14,
+    marginBottom: 10,
+  },
+  mediaIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: 'rgba(106, 83, 153, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   mediaIcon: { fontSize: 18 },
-  mediaInfo: { flex: 1, gap: 1 },
+  mediaInfo: { flex: 1, gap: 2 },
+  mediaPlayingTag: {
+    fontFamily: 'JetBrains Mono, Menlo, monospace',
+    fontSize: 8,
+    fontWeight: '700',
+    color: Colors.purple.light,
+    letterSpacing: 1,
+  },
   mediaTitle: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 12.5,
+    fontWeight: '700',
     color: Colors.text.primary,
   },
   mediaArtist: {
     fontSize: 11,
-    color: Colors.text.secondary,
-  },
-  mediaPlaying: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: Colors.cyan.primary,
-    letterSpacing: 0.5,
+    color: Colors.text.dim,
   },
 });
