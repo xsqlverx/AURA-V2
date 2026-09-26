@@ -74,36 +74,24 @@ export async function tryFastPath(text: string, pcConnected: boolean = false): P
     lower.includes('front view') ||
     (lower.includes('camera') && (lower.includes('front') || lower.includes('selfie')))
   ) {
-    try {
-      // Launch camera with front facing parameter
-      await Linking.openURL('intent:#Intent;action=android.media.action.IMAGE_CAPTURE;B.android.intent.extras.CAMERA_FACING=1;end');
-      return {
-        handled: true,
-        isCompound: false,
-        target: 'MOBILE',
-        actionTaken: 'CAMERA_FRONT',
-        message: 'Opening front camera in selfie mode.',
-      };
-    } catch {
-      await executeMobileCapability('open_app', { package: 'com.sec.android.app.camera' });
-      return {
-        handled: true,
-        isCompound: false,
-        target: 'MOBILE',
-        actionTaken: 'CAMERA',
-        message: 'Opening camera.',
-      };
-    }
+    const res = await executeMobileCapability('camera_front', {});
+    return {
+      handled: true,
+      isCompound: false,
+      target: 'MOBILE',
+      actionTaken: 'CAMERA_FRONT',
+      message: res.message || 'Opening front camera in selfie mode.',
+    };
   }
 
   if (lower.startsWith('open camera') || lower === 'camera' || lower.includes('launch camera')) {
-    await executeMobileCapability('open_app', { package: 'com.sec.android.app.camera' });
+    const res = await executeMobileCapability('camera_rear', {});
     return {
       handled: true,
       isCompound: false,
       target: 'MOBILE',
       actionTaken: 'CAMERA',
-      message: 'Launching camera.',
+      message: res.message || 'Launching camera viewfinder.',
     };
   }
 

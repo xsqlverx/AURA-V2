@@ -17,9 +17,9 @@ import { BottomTabBar } from '../../src/components/navigation/BottomTabBar';
 import { ParticleBackground } from '../../src/components/effects/ParticleBackground';
 import { Toast } from '../../src/components/shared/Toast';
 import { useAppStore } from '../../src/store/appStore';
-import { useSettingsStore } from '../../src/store/settingsStore';
 import { sendToPc, speakOnPc } from '../../src/api/client';
 import { executeMobileCapability } from '../../src/capabilities/mobileExecutor';
+import { getServiceStatus, openAccessibilitySettings } from '../../src/native/accessibility';
 
 type Segment = 'phone' | 'pc';
 
@@ -55,9 +55,30 @@ export default function AutomationScreen() {
   const [segment, setSegment] = useState<Segment>('phone');
   const [prankText, setPrankText] = useState('');
   const [isSendingPrank, setIsSendingPrank] = useState(false);
+  const [accessibilityEnabled, setAccessibilityEnabled] = useState(false);
   const [toast, setToast] = useState({ visible: false, message: '', type: 'info' as 'error' | 'info' | 'success' });
 
   const { pcConnected } = useAppStore();
+
+  React.useEffect(() => {
+    getServiceStatus().then((status) => {
+      setAccessibilityEnabled(status.enabled);
+    }).catch(() => {});
+  }, []);
+
+  const handleAccessibilityPress = async () => {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      if (!accessibilityEnabled) {
+        showToast('Opening Android Accessibility Settings...', 'info');
+        await openAccessibilitySettings();
+      } else {
+        showToast('Accessibility Engine is Active and Ready', 'success');
+      }
+    } catch {
+      showToast('Could not open accessibility settings', 'error');
+    }
+  };
 
   const showToast = (message: string, type: 'error' | 'info' | 'success' = 'info') => {
     setToast({ visible: true, message, type });
@@ -167,26 +188,34 @@ export default function AutomationScreen() {
         {segment === 'phone' ? (
           <>
             {/* Accessibility Core Status Banner */}
-            <View style={styles.card}>
+            <Pressable
+              style={({ pressed }) => [styles.card, pressed && { opacity: 0.85 }]}
+              onPress={handleAccessibilityPress}
+            >
               <View style={styles.cardHeader}>
-                <View style={[styles.cardIconBox, { backgroundColor: 'rgba(0, 240, 255, 0.12)' }]}>
-                  <Ionicons name="scan-outline" size={20} color={Colors.cyan.primary} />
+                <View style={[styles.cardIconBox, { backgroundColor: accessibilityEnabled ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 215, 0, 0.15)' }]}>
+                  <Ionicons name="scan-outline" size={20} color={accessibilityEnabled ? Colors.green.primary : Colors.gold.primary} />
                 </View>
                 <View style={styles.cardHeaderText}>
                   <Text style={styles.cardTitle}>Accessibility Screen Engine</Text>
                   <Text style={styles.cardSubtitle}>Autonomous UI reading & coordinate interaction</Text>
                 </View>
+                <Ionicons name="chevron-forward" size={16} color={Colors.text.dim} />
               </View>
 
-              <View style={styles.serviceStatusRow}>
-                <View style={[styles.statusDot, { backgroundColor: Colors.cyan.primary }]} />
-                <Text style={styles.serviceStatusText}>ENGINE ARMED // ONE UI READY</Text>
+              <View style={[styles.serviceStatusRow, { backgroundColor: accessibilityEnabled ? 'rgba(16, 185, 129, 0.08)' : 'rgba(255, 215, 0, 0.08)' }]}>
+                <View style={[styles.statusDot, { backgroundColor: accessibilityEnabled ? Colors.green.primary : Colors.gold.primary }]} />
+                <Text style={[styles.serviceStatusText, { color: accessibilityEnabled ? Colors.green.bright : Colors.gold.bright }]}>
+                  {accessibilityEnabled ? 'ENGINE ACTIVE // READY TO AUTOMATE' : 'TAP TO ENABLE IN ACCESSIBILITY SETTINGS'}
+                </Text>
               </View>
 
               <Text style={styles.serviceDesc}>
-                AURA parses active screen nodes, calculates touch coordinates, and automates multi-step app flows via native Android Accessibility Service.
+                {accessibilityEnabled
+                  ? 'AURA has native accessibility privileges to read screen nodes, tap coordinates, and automate multi-step tasks across apps.'
+                  : 'Tap this card to open Android Settings and turn ON AURA in Accessibility / Downloaded Apps.'}
               </Text>
-            </View>
+            </Pressable>
 
             {/* Quick Phone Automations */}
             <Text style={styles.sectionHeader}>ON-DEVICE SHORTCUTS</Text>

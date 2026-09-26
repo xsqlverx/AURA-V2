@@ -105,14 +105,20 @@ export default function SettingsScreen() {
 
   const handleTestPc = async () => {
     setIsTestingPc(true);
-    setPcBackendUrl(localPcUrl);
+    const cleaned = localPcUrl.trim();
+    if (!cleaned) {
+      showToast('Enter PC IP or URL (e.g. 100.x.y.z:8000)', 'error');
+      setIsTestingPc(false);
+      return;
+    }
+    setPcBackendUrl(cleaned);
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      const isOnline = await checkPcConnection();
+      const isOnline = await checkPcConnection(cleaned);
       if (isOnline) {
         showToast('PC Backend link verified: ONLINE', 'success');
       } else {
-        showToast('PC unreachable. Check IP address & port 8000', 'error');
+        showToast('PC unreachable. Ensure AURA is running on PC (port 8000)', 'error');
       }
     } catch {
       showToast('Connection test error', 'error');

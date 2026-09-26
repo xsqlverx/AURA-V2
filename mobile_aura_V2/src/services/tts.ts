@@ -64,17 +64,25 @@ export async function speak(text: string): Promise<void> {
     const cleaned = stripMarkdown(text).slice(0, MAX_TEXT_LENGTH);
     if (!cleaned) return;
 
-    const selectedVoice = voiceGender === 'female' ? cachedFemaleVoice : cachedMaleVoice;
+    // Stop ongoing speech before triggering new phrase
+    try {
+      await Speech.stop();
+    } catch {}
 
-    // Trigger instant speech without awaiting voice queries
-    Speech.speak(cleaned, {
-      rate: ttsSpeed,
+    const options: Speech.SpeechOptions = {
+      rate: Math.min(Math.max(ttsSpeed, 0.75), 1.75),
       pitch: voiceGender === 'female' ? 1.05 : 0.95,
       language: 'en-US',
-      voice: selectedVoice,
-    });
+    };
+
+    const selectedVoice = voiceGender === 'female' ? cachedFemaleVoice : cachedMaleVoice;
+    if (selectedVoice) {
+      options.voice = selectedVoice;
+    }
+
+    Speech.speak(cleaned, options);
   } catch (e) {
-    devLog.warn('Speech engine exception', e);
+    devLog.warn('Speech engine exception safely caught:', e);
   }
 }
 

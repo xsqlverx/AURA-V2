@@ -55,7 +55,7 @@ function getProviderEndpoint(provider: LLMProvider, customUrl?: string): string 
   }
 }
 
-// 1. Conversational Chat Stream (Uses Chat Provider, e.g. OpenRouter / Nvidia)
+// 1. Conversational Chat Stream (Uses Chat Provider, e.g. OpenRouter / Nvidia / Groq)
 export function streamFromOpenRouter(
   message: string,
   history: { role: string; content: string }[],
@@ -67,7 +67,7 @@ export function streamFromOpenRouter(
 
   if (!apiKey && chatProvider !== 'openrouter') {
     callbacks.onError(
-      new Error(`No API key for Chat Provider (${chatProvider.toUpperCase()}). Configure in Settings.`)
+      new Error(`No API key for ${chatProvider.toUpperCase()}. Please configure in Settings.`)
     );
     return () => {};
   }
@@ -83,7 +83,7 @@ export function streamFromOpenRouter(
   const model = chatModel || (chatProvider === 'groq' ? 'llama-3.3-70b-versatile' : 'openrouter/free');
 
   let cancelled = false;
-  let accumulated = '';
+  let timerId: ReturnType<typeof setInterval> | null = null;
 
   (async () => {
     try {
@@ -100,72 +100,69 @@ export function streamFromOpenRouter(
         headers['X-Title'] = 'AURA Mobile V2';
       }
 
+      devLog.info(`Querying ${chatProvider} with model ${model}`);
+
       const res = await fetch(endpoint, {
         method: 'POST',
         headers,
         body: JSON.stringify({
           model,
           messages,
-          stream: true,
+          stream: false,
           temperature: 0.7,
         }),
         signal,
       });
 
       if (!res.ok) {
-        const errBody = await res.text();
+        const errBody = await res.text().catch(() => '');
         if (res.status === 429) {
-          throw new Error('Rate limit reached on chat tier.');
+          throw new Error('Rate limit reached on AI provider.');
         }
         if (res.status === 401) {
-          throw new Error('Invalid Chat API Key. Check Settings.');
+          throw new Error('Invalid API Key. Please verify in Settings.');
         }
-        throw new Error(`API Error ${res.status}: ${errBody.slice(0, 160)}`);
+        throw new Error(`API ${res.status}: ${errBody.slice(0, 100) || 'Service error'}`);
       }
 
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error('Streaming not supported in this runtime');
+      const data = await res.json();
+      const fullText: string = data.choices?.[0]?.message?.content || 'Directive processed.';
 
-      const decoder = new TextDecoder();
-      let buffer = '';
+      if (cancelled) return;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done || cancelled) break;
+      // Simulate ultra-smooth fluid streaming in React Native Hermes
+      const words = fullText.split(/(\s+)/);
+      let currentIdx = 0;
+      let accumulated = '';
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || !trimmed.startsWith('data: ')) continue;
-          const data = trimmed.slice(6);
-          if (data === '[DONE]') continue;
-
-          try {
-            const parsed = JSON.parse(data);
-            const token = parsed.choices?.[0]?.delta?.content;
-            if (token) {
-              accumulated += token;
-              callbacks.onToken(accumulated);
-            }
-          } catch {}
+      // Stream words smoothly at 25ms intervals
+      timerId = setInterval(() => {
+        if (cancelled) {
+          if (timerId) clearInterval(timerId);
+          return;
         }
-      }
 
-      if (!cancelled) {
-        callbacks.onDone(accumulated);
-      }
+        if (currentIdx < words.length) {
+          accumulated += words[currentIdx];
+          currentIdx++;
+          callbacks.onToken(accumulated);
+        } else {
+          if (timerId) clearInterval(timerId);
+          callbacks.onDone(fullText);
+        }
+      }, 25);
     } catch (err: any) {
-      if (!cancelled && err.name !== 'AbortError') {
-        callbacks.onError(err);
+      if (timerId) clearInterval(timerId);
+      if (!cancelled && err?.name !== 'AbortError') {
+        devLog.error('Chat stream error', err);
+        callbacks.onError(err instanceof Error ? err : new Error(String(err)));
       }
     }
   })();
 
   return () => {
     cancelled = true;
+    if (timerId) clearInterval(timerId);
   };
 }
 

@@ -2,17 +2,35 @@ import axios from 'axios';
 import { devLog } from '../utils/devLog';
 import { useSettingsStore } from '../store/settingsStore';
 
+export function normalizeBackendUrl(rawUrl: string): string {
+  let url = (rawUrl || '').trim();
+  if (!url) return 'http://192.168.29.242:8000';
+  
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    url = 'http://' + url;
+  }
+  
+  url = url.replace(/\/+$/, '');
+  
+  const withoutScheme = url.replace(/^https?:\/\//, '');
+  if (!withoutScheme.includes(':') && !withoutScheme.includes('/')) {
+    url = url + ':8000';
+  }
+  
+  return url;
+}
+
 function getBaseUrl(): string {
-  return useSettingsStore.getState().pcBackendUrl || 'http://192.168.29.242:8000';
+  return normalizeBackendUrl(useSettingsStore.getState().pcBackendUrl);
 }
 
 function getApiKey(): string {
   return useSettingsStore.getState().mobileApiKey || 'testkey123';
 }
 
-function getClient() {
+function getClient(overrideBaseUrl?: string) {
   return axios.create({
-    baseURL: getBaseUrl(),
+    baseURL: overrideBaseUrl ? normalizeBackendUrl(overrideBaseUrl) : getBaseUrl(),
     timeout: 10000,
     headers: {
       Authorization: `Bearer ${getApiKey()}`,
@@ -21,12 +39,14 @@ function getClient() {
   });
 }
 
-export async function checkPcConnection(): Promise<boolean> {
+export async function checkPcConnection(overrideUrl?: string): Promise<boolean> {
   try {
-    const client = getClient();
-    const response = await client.get('/health', { timeout: 3000 });
-    return response.data?.status === 'ok';
-  } catch {
+    const client = getClient(overrideUrl);
+    devLog.info(`Checking PC link at: ${client.defaults.baseURL}/health`);
+    const response = await client.get('/health', { timeout: 6000 });
+    return response.data?.status === 'ok' || response.status === 200;
+  } catch (err: any) {
+    devLog.warn('PC check error:', err?.message || err);
     return false;
   }
 }

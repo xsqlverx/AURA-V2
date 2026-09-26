@@ -67,8 +67,8 @@ function ParticleNode({
     const sinAngle = Math.sin(rotation.value);
 
     // 3D Orbital Projection Math
-    const x = center + cosAngle * node.radius;
-    const y = center + sinAngle * node.radius * Math.cos(node.tilt);
+    const x = cosAngle * node.radius;
+    const y = sinAngle * node.radius * Math.cos(node.tilt);
     const zDepth = sinAngle * Math.sin(node.tilt); // Depth factor (-1 to +1)
 
     // Depth-based scaling & opacity
@@ -77,14 +77,18 @@ function ParticleNode({
 
     return {
       position: 'absolute',
-      left: x - node.size / 2,
-      top: y - node.size / 2,
+      left: center - node.size / 2,
+      top: center - node.size / 2,
       width: node.size,
       height: node.size,
       borderRadius: node.size / 2,
       backgroundColor: node.color || stateColor,
       opacity: depthOpacity,
-      transform: [{ scale: depthScale * pulse.value }],
+      transform: [
+        { translateX: x },
+        { translateY: y },
+        { scale: depthScale * pulse.value },
+      ],
       shadowColor: stateColor,
       shadowOffset: { width: 0, height: 0 },
       shadowOpacity: 0.8,

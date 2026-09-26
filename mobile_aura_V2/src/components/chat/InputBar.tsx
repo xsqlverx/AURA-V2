@@ -63,13 +63,11 @@ export function InputBar({
   }, [isListening]);
 
   const glowBorderStyle = useAnimatedStyle(() => ({
-    borderColor: isListening
-      ? Colors.cyan.primary
-      : `rgba(106, 83, 153, ${borderOpacity.value})`,
+    borderColor: isListening ? Colors.cyan.primary : Colors.purple.primary,
     shadowColor: isListening ? Colors.cyan.primary : Colors.purple.primary,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: borderOpacity.value * 0.6,
-    shadowRadius: 10,
+    shadowOpacity: isListening ? 0.9 : borderOpacity.value * 0.5,
+    shadowRadius: isListening ? 12 : 8,
   }));
 
   const sendAnimStyle = useAnimatedStyle(() => ({
