@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { FadeInDown } from 'react-native-reanimated';
+import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../../src/constants/colors';
 import { Theme } from '../../src/constants/theme';
 import { TopHudBar } from '../../src/components/navigation/TopHudBar';
@@ -105,7 +106,7 @@ export default function NotesScreen() {
         onLongPress={() => handleDelete(item.title)}
       >
         <View style={styles.noteIconWrap}>
-          <Text style={styles.noteIcon}>📋</Text>
+          <Ionicons name="document-text-outline" size={18} color={Colors.cyan.primary} />
         </View>
         <View style={styles.noteInfo}>
           <Text style={styles.noteTitle} numberOfLines={1}>
@@ -113,7 +114,7 @@ export default function NotesScreen() {
           </Text>
           {item.modified_at ? <Text style={styles.noteDate}>{item.modified_at}</Text> : null}
         </View>
-        <Text style={styles.noteChevron}>›</Text>
+        <Ionicons name="chevron-forward" size={16} color={Colors.text.dim} />
       </Pressable>
     </Animated.View>
   );
@@ -128,7 +129,8 @@ export default function NotesScreen() {
             <Text style={styles.detailContent}>{selected.content}</Text>
           </View>
           <Pressable style={styles.closeBtn} onPress={() => setSelected(null)}>
-            <Text style={styles.closeBtnText}>← BACK TO VAULT</Text>
+            <Ionicons name="arrow-back" size={14} color={Colors.purple.light} style={{ marginRight: 6 }} />
+            <Text style={styles.closeBtnText}>BACK TO VAULT</Text>
           </Pressable>
         </ScrollView>
         <BottomTabBar />
@@ -144,7 +146,7 @@ export default function NotesScreen() {
       {/* Action Strip */}
       <View style={styles.actionStrip}>
         <View style={styles.searchRow}>
-          <Text style={styles.searchIcon}>🔍</Text>
+          <Ionicons name="search-outline" size={16} color={Colors.text.dim} />
           <TextInput
             style={styles.searchInput}
             value={search}
@@ -155,7 +157,8 @@ export default function NotesScreen() {
         </View>
 
         <Pressable style={styles.addBtn} onPress={() => setCreating(!creating)}>
-          <Text style={styles.addBtnText}>{creating ? '✕' : '+ NEW'}</Text>
+          <Ionicons name={creating ? 'close' : 'add'} size={18} color="#FFFFFF" />
+          <Text style={styles.addBtnText}>{creating ? 'CANCEL' : 'NEW'}</Text>
         </Pressable>
       </View>
 
@@ -208,7 +211,7 @@ export default function NotesScreen() {
         }
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={styles.emptyIcon}>📋</Text>
+            <Ionicons name="documents-outline" size={36} color={Colors.text.dim} />
             <Text style={styles.emptyText}>
               {search
                 ? `No notes matching "${search}"`
@@ -247,7 +250,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     height: 38,
   },
-  searchIcon: { fontSize: 13 },
   searchInput: {
     flex: 1,
     fontFamily: 'JetBrains Mono, Menlo, monospace',
@@ -256,11 +258,13 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   addBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     backgroundColor: Colors.purple.primary,
     borderRadius: 12,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     height: 38,
-    alignItems: 'center',
     justifyContent: 'center',
   },
   addBtnText: {
@@ -332,7 +336,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  noteIcon: { fontSize: 16 },
   noteInfo: { flex: 1, gap: 2 },
   noteTitle: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',
@@ -344,11 +347,6 @@ const styles = StyleSheet.create({
     fontFamily: 'JetBrains Mono, Menlo, monospace',
     fontSize: 9.5,
     color: Colors.text.dim,
-  },
-  noteChevron: {
-    fontSize: 18,
-    color: Colors.text.dim,
-    fontFamily: 'JetBrains Mono, Menlo, monospace',
   },
 
   detailScroll: { flex: 1 },
@@ -367,12 +365,14 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   closeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: 'rgba(106, 83, 153, 0.2)',
     borderWidth: 1,
     borderColor: Colors.purple.primary,
     borderRadius: 12,
     paddingVertical: 12,
-    alignItems: 'center',
     marginBottom: 100,
   },
   closeBtnText: {
@@ -389,7 +389,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     gap: 8,
   },
-  emptyIcon: { fontSize: 32 },
   emptyText: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',
     fontSize: 12,

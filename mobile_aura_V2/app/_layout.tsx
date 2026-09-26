@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { StyleSheet } from 'react-native';
 import { BootSequence } from '../src/components/effects/BootSequence';
 import { useSettingsStore } from '../src/store/settingsStore';
+import { warmupVoiceEngine } from '../src/services/tts';
 import { Colors } from '../src/constants/colors';
 
 export default function RootLayout() {
@@ -12,6 +13,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     loadSettings();
+    warmupVoiceEngine();
   }, []);
 
   if (!booted) {

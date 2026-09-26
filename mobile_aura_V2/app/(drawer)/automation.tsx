@@ -6,9 +6,9 @@ import {
   TextInput,
   Pressable,
   StyleSheet,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Colors } from '../../src/constants/colors';
 import { Theme } from '../../src/constants/theme';
@@ -27,17 +27,28 @@ const PRANK_PRESETS = [
   'Step away from my computer right now.',
   'Intruder alert detected. Taking security snapshot.',
   'Hands off the keyboard, Kenaz is watching.',
-  'Self-destruct sequence initiated. 10 seconds remaining.',
+  'Self-destruct sequence initiated in 10 seconds.',
   'Warning: Unauthorized access recorded.',
 ];
 
-const PHONE_SHORTCUTS = [
-  { id: 'whatsapp', label: 'WhatsApp Message', icon: '💬', app: 'com.whatsapp', desc: 'Direct message automation' },
-  { id: 'instagram', label: 'Instagram Feed', icon: '📷', app: 'com.instagram.android', desc: 'Open social matrix' },
-  { id: 'youtube', label: 'YouTube Search', icon: '▶️', app: 'com.google.android.youtube', desc: 'Search & stream video' },
-  { id: 'settings', label: 'System Settings', icon: '⚙️', capability: 'open_settings', desc: 'Device configurations' },
-  { id: 'battery', label: 'Battery Analytics', icon: '🔋', capability: 'get_battery_level', desc: 'Power telemetry' },
-  { id: 'wifi', label: 'Network Matrix', icon: '📶', capability: 'get_wifi_status', desc: 'Connectivity status' },
+interface PhoneShortcutItem {
+  id: string;
+  label: string;
+  iconName: keyof typeof Ionicons.glyphMap;
+  app?: string;
+  capability?: string;
+  desc: string;
+}
+
+const PHONE_SHORTCUTS: PhoneShortcutItem[] = [
+  { id: 'whatsapp', label: 'WhatsApp', iconName: 'logo-whatsapp', app: 'com.whatsapp', desc: 'Chat & voice matrix' },
+  { id: 'instagram', label: 'Instagram', iconName: 'logo-instagram', app: 'com.instagram.android', desc: 'Social media stream' },
+  { id: 'youtube', label: 'YouTube', iconName: 'logo-youtube', app: 'com.google.android.youtube', desc: 'Video & audio search' },
+  { id: 'camera_front', label: 'Front Camera', iconName: 'camera-reverse-outline', capability: 'camera_front', desc: 'Selfie viewfinder' },
+  { id: 'settings', label: 'System Settings', iconName: 'settings-outline', capability: 'open_settings', desc: 'Android parameters' },
+  { id: 'battery', label: 'Battery Telemetry', iconName: 'battery-charging-outline', capability: 'get_battery_level', desc: 'Power diagnostics' },
+  { id: 'wifi', label: 'Network Matrix', iconName: 'wifi-outline', capability: 'get_wifi_status', desc: 'WiFi connectivity' },
+  { id: 'dialer', label: 'Phone Dialer', iconName: 'call-outline', capability: 'make_call', desc: 'Voice telecommunications' },
 ];
 
 export default function AutomationScreen() {
@@ -46,8 +57,7 @@ export default function AutomationScreen() {
   const [isSendingPrank, setIsSendingPrank] = useState(false);
   const [toast, setToast] = useState({ visible: false, message: '', type: 'info' as 'error' | 'info' | 'success' });
 
-  const { pcConnected, setOrbState } = useAppStore();
-  const { accessibilityEnabled, setAccessibilityEnabled } = useSettingsStore();
+  const { pcConnected } = useAppStore();
 
   const showToast = (message: string, type: 'error' | 'info' | 'success' = 'info') => {
     setToast({ visible: true, message, type });
@@ -96,7 +106,7 @@ export default function AutomationScreen() {
     }
   };
 
-  const handlePhoneShortcut = async (shortcut: typeof PHONE_SHORTCUTS[0]) => {
+  const handlePhoneShortcut = async (shortcut: PhoneShortcutItem) => {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       if (shortcut.app) {
@@ -125,8 +135,14 @@ export default function AutomationScreen() {
             setSegment('phone');
           }}
         >
-          <Text style={[styles.segmentIcon, segment === 'phone' && { color: Colors.cyan.primary }]}>📱</Text>
-          <Text style={[styles.segmentText, segment === 'phone' && styles.segmentTextActive]}>PHONE AGENT</Text>
+          <Ionicons
+            name="phone-portrait-outline"
+            size={16}
+            color={segment === 'phone' ? Colors.cyan.primary : Colors.text.dim}
+          />
+          <Text style={[styles.segmentText, segment === 'phone' && styles.segmentTextActive]}>
+            PHONE AGENT
+          </Text>
         </Pressable>
 
         <Pressable
@@ -136,8 +152,14 @@ export default function AutomationScreen() {
             setSegment('pc');
           }}
         >
-          <Text style={[styles.segmentIcon, segment === 'pc' && { color: Colors.purple.light }]}>🖥️</Text>
-          <Text style={[styles.segmentText, segment === 'pc' && styles.segmentTextActive]}>PC ACTIONS</Text>
+          <Ionicons
+            name="desktop-outline"
+            size={16}
+            color={segment === 'pc' ? Colors.purple.light : Colors.text.dim}
+          />
+          <Text style={[styles.segmentText, segment === 'pc' && styles.segmentTextActive]}>
+            PC ACTIONS
+          </Text>
         </Pressable>
       </View>
 
@@ -148,7 +170,7 @@ export default function AutomationScreen() {
             <View style={styles.card}>
               <View style={styles.cardHeader}>
                 <View style={[styles.cardIconBox, { backgroundColor: 'rgba(0, 240, 255, 0.12)' }]}>
-                  <Text style={styles.cardIcon}>⚡</Text>
+                  <Ionicons name="scan-outline" size={20} color={Colors.cyan.primary} />
                 </View>
                 <View style={styles.cardHeaderText}>
                   <Text style={styles.cardTitle}>Accessibility Screen Engine</Text>
@@ -175,14 +197,16 @@ export default function AutomationScreen() {
                   style={({ pressed }) => [styles.gridCard, pressed && { opacity: 0.75 }]}
                   onPress={() => handlePhoneShortcut(s)}
                 >
-                  <Text style={styles.gridIcon}>{s.icon}</Text>
+                  <View style={styles.gridIconWrap}>
+                    <Ionicons name={s.iconName} size={20} color={Colors.cyan.primary} />
+                  </View>
                   <Text style={styles.gridLabel}>{s.label}</Text>
                   <Text style={styles.gridDesc} numberOfLines={1}>{s.desc}</Text>
                 </Pressable>
               ))}
             </View>
 
-            {/* Recent Tasks Mock/Placeholder */}
+            {/* Recent Tasks Stream */}
             <Text style={styles.sectionHeader}>TASK AUDIT STREAM</Text>
             <View style={styles.card}>
               <View style={styles.taskRow}>
@@ -190,8 +214,8 @@ export default function AutomationScreen() {
                   <Text style={[styles.taskBadgeText, { color: Colors.green.bright }]}>COMPLETED</Text>
                 </View>
                 <View style={styles.taskInfo}>
-                  <Text style={styles.taskTitle}>System Diagnostics Check</Text>
-                  <Text style={styles.taskTime}>Just now · Needle SLM Router</Text>
+                  <Text style={styles.taskTitle}>FastPath Intent Parsed</Text>
+                  <Text style={styles.taskTime}>Zero LLM Latency Engine</Text>
                 </View>
               </View>
               <View style={styles.divider} />
@@ -212,7 +236,7 @@ export default function AutomationScreen() {
             <View style={[styles.card, styles.prankCard]}>
               <View style={styles.cardHeader}>
                 <View style={[styles.cardIconBox, { backgroundColor: 'rgba(157, 101, 255, 0.15)' }]}>
-                  <Text style={styles.cardIcon}>🗣️</Text>
+                  <Ionicons name="volume-high-outline" size={20} color={Colors.purple.light} />
                 </View>
                 <View style={styles.cardHeaderText}>
                   <Text style={styles.cardTitle}>Speak Through PC</Text>
@@ -260,7 +284,9 @@ export default function AutomationScreen() {
                 style={({ pressed }) => [styles.gridCard, pressed && { opacity: 0.75 }]}
                 onPress={() => handlePcAction('Lock PC', 'lock_pc')}
               >
-                <Text style={styles.gridIcon}>🔒</Text>
+                <View style={styles.gridIconWrap}>
+                  <Ionicons name="lock-closed-outline" size={20} color={Colors.cyan.primary} />
+                </View>
                 <Text style={styles.gridLabel}>Lock PC</Text>
                 <Text style={styles.gridDesc}>Instant desktop lock</Text>
               </Pressable>
@@ -269,7 +295,9 @@ export default function AutomationScreen() {
                 style={({ pressed }) => [styles.gridCard, pressed && { opacity: 0.75 }]}
                 onPress={() => handlePcAction('Sleep PC', 'sleep_pc')}
               >
-                <Text style={styles.gridIcon}>💤</Text>
+                <View style={styles.gridIconWrap}>
+                  <Ionicons name="moon-outline" size={20} color={Colors.cyan.primary} />
+                </View>
                 <Text style={styles.gridLabel}>Sleep PC</Text>
                 <Text style={styles.gridDesc}>Low power suspend</Text>
               </Pressable>
@@ -278,7 +306,9 @@ export default function AutomationScreen() {
                 style={({ pressed }) => [styles.gridCard, pressed && { opacity: 0.75 }]}
                 onPress={() => handlePcAction('Toggle Media', 'play_pause')}
               >
-                <Text style={styles.gridIcon}>⏯️</Text>
+                <View style={styles.gridIconWrap}>
+                  <Ionicons name="play-outline" size={20} color={Colors.cyan.primary} />
+                </View>
                 <Text style={styles.gridLabel}>Media Play/Pause</Text>
                 <Text style={styles.gridDesc}>Global media session</Text>
               </Pressable>
@@ -287,7 +317,9 @@ export default function AutomationScreen() {
                 style={({ pressed }) => [styles.gridCard, pressed && { opacity: 0.75 }]}
                 onPress={() => handlePcAction('Mute Audio', 'mute_audio')}
               >
-                <Text style={styles.gridIcon}>🔇</Text>
+                <View style={styles.gridIconWrap}>
+                  <Ionicons name="volume-mute-outline" size={20} color={Colors.cyan.primary} />
+                </View>
                 <Text style={styles.gridLabel}>Mute / Unmute</Text>
                 <Text style={styles.gridDesc}>PC Master Volume</Text>
               </Pressable>
@@ -295,7 +327,7 @@ export default function AutomationScreen() {
           </>
         )}
 
-        <View style={{ height: 100 }} />
+        <View style={{ height: 110 }} />
       </ScrollView>
 
       <BottomTabBar />
@@ -342,9 +374,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(106, 83, 153, 0.25)',
     borderColor: Colors.purple.primary,
   },
-  segmentIcon: {
-    fontSize: 14,
-  },
   segmentText: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',
     fontSize: 11,
@@ -382,9 +411,6 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  cardIcon: {
-    fontSize: 18,
   },
   cardHeaderText: {
     flex: 1,
@@ -451,11 +477,15 @@ const styles = StyleSheet.create({
     borderColor: Colors.surfaceBorder,
     borderRadius: 14,
     padding: 14,
-    gap: 4,
+    gap: 6,
   },
-  gridIcon: {
-    fontSize: 22,
-    marginBottom: 4,
+  gridIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0, 240, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   gridLabel: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',

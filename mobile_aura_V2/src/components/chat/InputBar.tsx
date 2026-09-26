@@ -8,6 +8,7 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Colors } from '../../constants/colors';
 import { Theme } from '../../constants/theme';
@@ -31,6 +32,9 @@ export function InputBar({
 }: InputBarProps) {
   const borderOpacity = useSharedValue(0.3);
   const sendScale = useSharedValue(1);
+  const micPulse = useSharedValue(1);
+
+  const isListening = orbState === 'listening';
 
   useEffect(() => {
     borderOpacity.value = withRepeat(
@@ -43,12 +47,26 @@ export function InputBar({
     );
   }, []);
 
+  useEffect(() => {
+    if (isListening) {
+      micPulse.value = withRepeat(
+        withSequence(
+          withTiming(1.2, { duration: 600 }),
+          withTiming(1.0, { duration: 600 })
+        ),
+        -1,
+        true
+      );
+    } else {
+      micPulse.value = withSpring(1);
+    }
+  }, [isListening]);
+
   const glowBorderStyle = useAnimatedStyle(() => ({
-    borderColor:
-      orbState === 'listening'
-        ? Colors.cyan.primary
-        : `rgba(106, 83, 153, ${borderOpacity.value})`,
-    shadowColor: orbState === 'listening' ? Colors.cyan.primary : Colors.purple.primary,
+    borderColor: isListening
+      ? Colors.cyan.primary
+      : `rgba(106, 83, 153, ${borderOpacity.value})`,
+    shadowColor: isListening ? Colors.cyan.primary : Colors.purple.primary,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: borderOpacity.value * 0.6,
     shadowRadius: 10,
@@ -56,6 +74,10 @@ export function InputBar({
 
   const sendAnimStyle = useAnimatedStyle(() => ({
     transform: [{ scale: sendScale.value }],
+  }));
+
+  const micAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: micPulse.value }],
   }));
 
   const handlePressIn = () => {
@@ -74,10 +96,15 @@ export function InputBar({
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } catch {}
-    onMicPress?.();
+    if (onMicPress) {
+      try {
+        onMicPress();
+      } catch (e) {
+        // Safe guard against native crashes
+      }
+    }
   };
 
-  const isActive = orbState === 'listening';
   const hasText = Boolean(value.trim());
 
   return (
@@ -86,7 +113,7 @@ export function InputBar({
         style={[
           styles.container,
           {
-            backgroundColor: isActive ? 'rgba(0, 240, 255, 0.05)' : 'rgba(18, 16, 26, 0.85)',
+            backgroundColor: isListening ? 'rgba(0, 240, 255, 0.06)' : 'rgba(18, 16, 26, 0.88)',
           },
           glowBorderStyle,
         ]}
@@ -95,8 +122,8 @@ export function InputBar({
           style={styles.input}
           value={value}
           onChangeText={onChangeText}
-          placeholder="Direct AURA or ask anything..."
-          placeholderTextColor={Colors.text.dim}
+          placeholder={isListening ? "Listening... Speak now..." : "Direct AURA or ask anything..."}
+          placeholderTextColor={isListening ? Colors.cyan.bright : Colors.text.dim}
           multiline={false}
           returnKeyType="send"
           onSubmitEditing={onSend}
@@ -104,13 +131,20 @@ export function InputBar({
         />
 
         {/* Mic / Voice trigger */}
-        <Pressable
-          style={[styles.micBtn, isActive && styles.micBtnActive]}
-          onPress={handleMic}
-        >
-          <Text style={[styles.micIcon, isActive && { color: Colors.cyan.primary }]}>
-            {isActive ? '🔊' : '🎙️'}
-          </Text>
+        <Pressable onPress={handleMic} style={styles.micHitArea}>
+          <Animated.View
+            style={[
+              styles.micBtn,
+              isListening && styles.micBtnActive,
+              micAnimStyle,
+            ]}
+          >
+            <Ionicons
+              name={isListening ? 'mic' : 'mic-outline'}
+              size={18}
+              color={isListening ? Colors.cyan.primary : Colors.purple.light}
+            />
+          </Animated.View>
         </Pressable>
 
         {/* Send Button */}
@@ -126,7 +160,7 @@ export function InputBar({
               sendAnimStyle,
             ]}
           >
-            <Text style={styles.sendArrow}>▲</Text>
+            <Ionicons name="arrow-up" size={16} color="#FFFFFF" />
           </Animated.View>
         </Pressable>
       </Animated.View>
@@ -145,7 +179,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1.5,
     borderRadius: 24,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     paddingVertical: 6,
     gap: 8,
     elevation: 8,
@@ -157,26 +191,31 @@ const styles = StyleSheet.create({
     color: Colors.text.primary,
     paddingVertical: 6,
   },
+  micHitArea: {
+    padding: 2,
+  },
   micBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    backgroundColor: 'rgba(106, 83, 153, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(106, 83, 153, 0.35)',
   },
   micBtnActive: {
-    backgroundColor: 'rgba(0, 240, 255, 0.15)',
-    borderWidth: 1,
+    backgroundColor: 'rgba(0, 240, 255, 0.2)',
     borderColor: Colors.cyan.primary,
-  },
-  micIcon: {
-    fontSize: 15,
+    shadowColor: Colors.cyan.primary,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9,
+    shadowRadius: 8,
   },
   sendBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: Colors.purple.primary,
     alignItems: 'center',
     justifyContent: 'center',
@@ -188,10 +227,5 @@ const styles = StyleSheet.create({
   sendBtnDisabled: {
     opacity: 0.35,
     backgroundColor: Colors.surfaceElevated,
-  },
-  sendArrow: {
-    fontSize: 11,
-    color: '#FFFFFF',
-    fontWeight: '700',
   },
 });

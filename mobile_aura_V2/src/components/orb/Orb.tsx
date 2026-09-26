@@ -15,35 +15,27 @@ import { Theme } from '../../constants/theme';
 import { getOrbConfig } from './OrbStateMachine';
 import { OrbParticles } from './OrbParticles';
 import { OrbRings } from './OrbRings';
+import { OrbContainmentCradle } from './OrbContainmentCradle';
 import type { OrbState } from '../../types';
 
 interface OrbProps {
   state: OrbState;
   onPress?: () => void;
   size?: number;
+  showCradle?: boolean;
 }
 
-function lightenColor(hex: string, amount: number): string {
-  try {
-    if (!hex.startsWith('#') || hex.length < 7) return hex;
-    const r = parseInt(hex.slice(1, 3), 16);
-    const g = parseInt(hex.slice(3, 5), 16);
-    const b = parseInt(hex.slice(5, 7), 16);
-    const nr = Math.min(255, r + amount);
-    const ng = Math.min(255, g + amount);
-    const nb = Math.min(255, b + amount);
-    return `#${nr.toString(16).padStart(2, '0')}${ng.toString(16).padStart(2, '0')}${nb.toString(16).padStart(2, '0')}`;
-  } catch {
-    return hex;
-  }
-}
-
-export function Orb({ state, onPress, size = Theme.orb.size }: OrbProps) {
+export function Orb({
+  state,
+  onPress,
+  size = Theme.orb.size,
+  showCradle = true,
+}: OrbProps) {
   const config = getOrbConfig(state);
   const glowScale = useSharedValue(1);
   const glowOpacity = useSharedValue(config.glowIntensity);
-  const orbScale = useSharedValue(1);
-  const ringRotation = useSharedValue(0);
+  const coreScale = useSharedValue(1);
+  const corePulse = useSharedValue(1);
 
   useEffect(() => {
     if (config.pulseSpeed === 0) {
@@ -54,7 +46,7 @@ export function Orb({ state, onPress, size = Theme.orb.size }: OrbProps) {
 
     glowScale.value = withRepeat(
       withSequence(
-        withTiming(1.18, { duration: config.pulseSpeed }),
+        withTiming(1.22, { duration: config.pulseSpeed }),
         withTiming(1.0, { duration: config.pulseSpeed })
       ),
       -1,
@@ -63,77 +55,53 @@ export function Orb({ state, onPress, size = Theme.orb.size }: OrbProps) {
 
     glowOpacity.value = withRepeat(
       withSequence(
-        withTiming(Math.min(config.glowIntensity * 1.4, 1), { duration: config.pulseSpeed }),
-        withTiming(config.glowIntensity * 0.7, { duration: config.pulseSpeed })
+        withTiming(Math.min(config.glowIntensity * 1.5, 1), { duration: config.pulseSpeed }),
+        withTiming(config.glowIntensity * 0.6, { duration: config.pulseSpeed })
       ),
       -1,
       false
     );
 
-    ringRotation.value = withRepeat(
-      withTiming(360, { duration: config.ringSpeed || 6000 }),
+    corePulse.value = withRepeat(
+      withSequence(
+        withTiming(1.08, { duration: config.pulseSpeed * 0.6 }),
+        withTiming(0.94, { duration: config.pulseSpeed * 0.6 })
+      ),
       -1,
-      false
+      true
     );
-  }, [state, config.pulseSpeed, config.glowIntensity, config.ringSpeed]);
+  }, [state, config.pulseSpeed, config.glowIntensity]);
 
   const glowStyle = useAnimatedStyle(() => ({
     transform: [{ scale: glowScale.value }],
     opacity: glowOpacity.value,
   }));
 
-  const orbStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: orbScale.value }],
-  }));
-
-  const haloStyle = useAnimatedStyle(() => ({
-    opacity: config.haloVisible
-      ? withRepeat(
-          withSequence(
-            withTiming(0.4, { duration: 1800 }),
-            withTiming(0.15, { duration: 1800 })
-          ),
-          -1,
-          false
-        )
-      : 0,
+  const coreAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: coreScale.value * corePulse.value }],
   }));
 
   const handlePressIn = () => {
-    orbScale.value = withSpring(0.9, Theme.animation.orbSpring);
+    coreScale.value = withSpring(0.88, Theme.animation.orbSpring);
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } catch {}
   };
 
   const handlePressOut = () => {
-    orbScale.value = withSpring(1, Theme.animation.orbSpring);
+    coreScale.value = withSpring(1, Theme.animation.orbSpring);
     onPress?.();
   };
 
-  const glowSize = size * 2.4;
-  const lightColor = lightenColor(config.coreColor, 50);
+  const glowSize = size * 2.5;
 
   return (
     <Pressable onPressIn={handlePressIn} onPressOut={handlePressOut}>
       <View style={[styles.container, { width: glowSize, height: glowSize }]}>
-        {/* Layer 1: Ambient Halo */}
-        {config.haloVisible && (
-          <Animated.View
-            style={[
-              styles.halo,
-              {
-                width: glowSize * 1.15,
-                height: glowSize * 1.15,
-                borderRadius: (glowSize * 1.15) / 2,
-                backgroundColor: config.glowColor,
-              },
-              haloStyle,
-            ]}
-          />
-        )}
+        {/* Layer 0: Encompassing Containment Cradle (Encompassing bounding box with corner dots) */}
+        {showCradle && <OrbContainmentCradle size={size} state={state} />}
 
-        {/* Layer 2: Core Glow Matrix */}
+        {/* Layer 1: Ambient Plasma Glow */}
         <Animated.View
           style={[
             styles.glow,
@@ -147,81 +115,65 @@ export function Orb({ state, onPress, size = Theme.orb.size }: OrbProps) {
           ]}
         />
 
-        {/* Layer 3: Rotating Orbital Rings */}
+        {/* Layer 2: Rotating Orbital Ring Shells */}
         <OrbRings
           count={config.ringCount}
           color={config.ringColor || config.coreColor}
-          size={size}
+          size={size * 1.1}
           speed={config.ringSpeed}
         />
 
-        {/* Layer 4: Floating / Orbiting Energy Particles */}
+        {/* Layer 3: 3D Holographic Particle Swarm (Pure particles living in 3D orbit) */}
         <OrbParticles
-          count={config.particleCount}
-          mode={config.particleMode === 'pulse' ? 'orbit' : config.particleMode}
-          color={config.particleColor || config.coreColor}
-          size={size}
+          size={size * 1.4}
+          color={config.coreColor}
           speed={config.pulseSpeed}
+          count={26}
+          mode={config.particleMode}
         />
 
-        {/* Layer 5: Holographic Sphere Core */}
-        <Animated.View style={[styles.orbWrapper, orbStyle]}>
+        {/* Layer 4: Floating Central Photon Core */}
+        <Animated.View style={[styles.coreWrapper, coreAnimStyle]}>
           <LinearGradient
             colors={[
-              lightColor,
+              '#FFFFFF',
               config.coreColor,
               Colors.purple.dark,
-              '#050308',
+              'rgba(10, 8, 16, 0.9)',
             ]}
-            start={{ x: 0.25, y: 0.1 }}
-            end={{ x: 0.85, y: 0.95 }}
+            start={{ x: 0.3, y: 0.1 }}
+            end={{ x: 0.9, y: 0.9 }}
             style={[
-              styles.orb,
+              styles.photonCore,
               {
-                width: size,
-                height: size,
-                borderRadius: size / 2,
-                borderWidth: 1.5,
-                borderColor: 'rgba(255, 255, 255, 0.25)',
+                width: size * 0.7,
+                height: size * 0.7,
+                borderRadius: (size * 0.7) / 2,
                 shadowColor: config.coreColor,
                 shadowOffset: { width: 0, height: 0 },
-                shadowOpacity: 0.8,
-                shadowRadius: 24,
-                elevation: 16,
+                shadowOpacity: 0.95,
+                shadowRadius: 28,
+                elevation: 20,
+              },
+            ]}
+          />
+
+          {/* Central Singularity Spark */}
+          <View
+            style={[
+              styles.singularity,
+              {
+                width: size * 0.18,
+                height: size * 0.18,
+                borderRadius: (size * 0.18) / 2,
+                backgroundColor: '#FFFFFF',
+                shadowColor: Colors.cyan.primary,
+                shadowOpacity: 1,
+                shadowRadius: 10,
               },
             ]}
           />
         </Animated.View>
-
-        {/* Layer 6: Glass Reflection Arc */}
-        <View
-          style={[
-            styles.innerHighlight,
-            {
-              width: size * 0.45,
-              height: size * 0.45,
-              borderRadius: (size * 0.45) / 2,
-              top: (glowSize - size) / 2 + size * 0.08,
-              left: (glowSize - size) / 2 + size * 0.12,
-            },
-          ]}
-        />
-
-        {/* Layer 7: Cyber Energy Dot in Center */}
-        <View
-          style={[
-            styles.centerSpark,
-            {
-              width: size * 0.14,
-              height: size * 0.14,
-              borderRadius: (size * 0.14) / 2,
-              backgroundColor: '#FFFFFF',
-              shadowColor: Colors.cyan.primary,
-              shadowOpacity: 1,
-              shadowRadius: 8,
-            },
-          ]}
-        />
       </View>
     </Pressable>
   );
@@ -231,29 +183,22 @@ const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  halo: {
-    position: 'absolute',
-    opacity: 0.18,
+    position: 'relative',
   },
   glow: {
     position: 'absolute',
-    opacity: 0.35,
+    opacity: 0.4,
   },
-  orbWrapper: {
-    justifyContent: 'center',
+  coreWrapper: {
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  orb: {},
-  innerHighlight: {
-    position: 'absolute',
-    backgroundColor: 'rgba(255, 255, 255, 0.22)',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.45)',
+  photonCore: {
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.4)',
   },
-  centerSpark: {
+  singularity: {
     position: 'absolute',
-    opacity: 0.85,
+    alignSelf: 'center',
   },
 });

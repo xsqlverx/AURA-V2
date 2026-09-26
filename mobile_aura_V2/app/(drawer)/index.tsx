@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { View, Text, Pressable, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Orb } from '../../src/components/orb/Orb';
 import { ParticleBackground } from '../../src/components/effects/ParticleBackground';
@@ -14,17 +15,25 @@ import { useSettingsStore, PRESET_MODELS } from '../../src/store/settingsStore';
 import { checkPcConnection } from '../../src/api/client';
 import { getOrbConfig } from '../../src/components/orb/OrbStateMachine';
 
-const QUICK_ACTIONS = [
-  { id: 'chat', label: 'Neural Chat', icon: '◎', route: '/chat', desc: 'Realtime streaming & voice' },
-  { id: 'automation', label: 'Automation Hub', icon: '⚡', route: '/automation', desc: 'Phone & PC actions' },
-  { id: 'desktop', label: 'PC Live Telemetry', icon: '📊', route: '/desktop', desc: 'Hardware & Media' },
-  { id: 'settings', label: 'Core Config', icon: '⚙', route: '/settings', desc: 'LLM & Voice Setup' },
+interface ActionCardItem {
+  id: string;
+  label: string;
+  iconName: keyof typeof Ionicons.glyphMap;
+  route: '/' | '/chat' | '/automation' | '/settings';
+  desc: string;
+}
+
+const QUICK_ACTIONS: ActionCardItem[] = [
+  { id: 'chat', label: 'Neural Chat Stream', iconName: 'chatbubbles-outline', route: '/chat', desc: 'Realtime intelligence & voice' },
+  { id: 'automation', label: 'Automation Matrix', iconName: 'flash-outline', route: '/automation', desc: 'FastPath tools & PC actions' },
+  { id: 'desktop', label: 'PC Live Telemetry', iconName: 'stats-chart-outline', route: '/desktop' as any, desc: 'Hardware vitals & media' },
+  { id: 'settings', label: 'System Configuration', iconName: 'options-outline', route: '/settings', desc: 'Dual-provider & audio config' },
 ];
 
 export default function HomeScreen() {
   const router = useRouter();
   const { orbState, pcConnected, setOrbState, setPcConnected } = useAppStore();
-  const { activeProvider, llmModel } = useSettingsStore();
+  const { toolModel, chatModel, toolProvider, chatProvider } = useSettingsStore();
 
   const orbConfig = getOrbConfig(orbState);
 
@@ -37,8 +46,10 @@ export default function HomeScreen() {
   if (time >= 5 && time < 12) greeting = 'Good morning';
   else if (time >= 12 && time < 17) greeting = 'Good afternoon';
 
-  const currentModelName =
-    PRESET_MODELS.find((m) => m.id === llmModel)?.name || llmModel || 'Auto Free Router';
+  const toolModelName =
+    PRESET_MODELS.find((m) => m.id === toolModel)?.name || toolModel || 'Llama 3.3 70B';
+  const chatModelName =
+    PRESET_MODELS.find((m) => m.id === chatModel)?.name || chatModel || 'Auto Free Router';
 
   const handleOrbTap = () => {
     try {
@@ -53,16 +64,9 @@ export default function HomeScreen() {
       <TopHudBar title="AURA" subtitle="NEURAL COPILOT // ONLINE" />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Interactive Hero Orb Section */}
+        {/* Interactive Hero 3D Particle Swarm Orb with Encompassing Cradle */}
         <View style={styles.orbSection}>
-          <View style={styles.reticleOverlay}>
-            <View style={styles.cornerTL} />
-            <View style={styles.cornerTR} />
-            <View style={styles.cornerBL} />
-            <View style={styles.cornerBR} />
-          </View>
-
-          <Orb state={orbState} size={120} onPress={handleOrbTap} />
+          <Orb state={orbState} size={110} onPress={handleOrbTap} showCradle />
 
           <Pressable style={styles.stateBadge} onPress={handleOrbTap}>
             <View style={[styles.stateDot, { backgroundColor: orbConfig.coreColor }]} />
@@ -77,40 +81,33 @@ export default function HomeScreen() {
         <View style={styles.greetingSection}>
           <Text style={styles.greetingTime}>{greeting},</Text>
           <Text style={styles.greetingName}>Kenaz.</Text>
-          <Text style={styles.greetingTag}>AURA READY // TAP ORB TO ENGAGE</Text>
+          <Text style={styles.greetingTag}>AURA READY // FASTPATH ACTIVE</Text>
         </View>
 
-        {/* Vitals & Status Cards */}
+        {/* Dual-Brain Telemetry Cards */}
         <View style={styles.vitalsGrid}>
-          {/* Active Brain Matrix */}
+          {/* Tool Engine Card */}
           <View style={styles.vitalCard}>
             <View style={styles.vitalHeader}>
-              <Text style={styles.vitalIcon}>🧠</Text>
-              <Text style={styles.vitalLabel}>ACTIVE BRAIN</Text>
+              <Ionicons name="hardware-chip-outline" size={14} color={Colors.cyan.primary} />
+              <Text style={styles.vitalLabel}>TOOL ENGINE</Text>
             </View>
             <Text style={styles.vitalValue} numberOfLines={1}>
-              {currentModelName}
+              {toolModelName}
             </Text>
-            <Text style={styles.vitalSub}>PROVIDER: {activeProvider.toUpperCase()}</Text>
+            <Text style={styles.vitalSub}>PROVIDER: {toolProvider.toUpperCase()}</Text>
           </View>
 
-          {/* PC Bridge State */}
+          {/* Conversational Brain Card */}
           <View style={styles.vitalCard}>
             <View style={styles.vitalHeader}>
-              <Text style={styles.vitalIcon}>💻</Text>
-              <Text style={styles.vitalLabel}>PC STATUS</Text>
+              <Ionicons name="chatbubbles-outline" size={14} color={Colors.purple.light} />
+              <Text style={styles.vitalLabel}>CHAT BRAIN</Text>
             </View>
-            <Text
-              style={[
-                styles.vitalValue,
-                { color: pcConnected ? Colors.green.bright : Colors.text.dim },
-              ]}
-            >
-              {pcConnected ? 'SYNCHRONIZED' : 'OFFLINE'}
+            <Text style={styles.vitalValue} numberOfLines={1}>
+              {chatModelName}
             </Text>
-            <Text style={styles.vitalSub}>
-              {pcConnected ? 'DESKTOP LINK ACTIVE' : 'LOCAL AUTONOMOUS'}
-            </Text>
+            <Text style={styles.vitalSub}>PROVIDER: {chatProvider.toUpperCase()}</Text>
           </View>
         </View>
 
@@ -132,7 +129,7 @@ export default function HomeScreen() {
               }}
             >
               <View style={styles.tileIconBox}>
-                <Text style={styles.tileIcon}>{item.icon}</Text>
+                <Ionicons name={item.iconName} size={18} color={Colors.cyan.primary} />
               </View>
               <View style={styles.tileInfo}>
                 <Text style={styles.tileTitle}>{item.label}</Text>
@@ -140,7 +137,7 @@ export default function HomeScreen() {
                   {item.desc}
                 </Text>
               </View>
-              <Text style={styles.tileArrow}>›</Text>
+              <Ionicons name="chevron-forward" size={16} color={Colors.text.dim} />
             </Pressable>
           ))}
         </View>
@@ -166,64 +163,17 @@ const styles = StyleSheet.create({
   orbSection: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 20,
+    paddingVertical: 14,
     position: 'relative',
-    marginVertical: 4,
+    marginVertical: 2,
   },
-  reticleOverlay: {
-    position: 'absolute',
-    width: 220,
-    height: 220,
-    pointerEvents: 'none',
-  },
-  cornerTL: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    width: 16,
-    height: 16,
-    borderTopWidth: 1.5,
-    borderLeftWidth: 1.5,
-    borderColor: 'rgba(106, 83, 153, 0.4)',
-  },
-  cornerTR: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    width: 16,
-    height: 16,
-    borderTopWidth: 1.5,
-    borderRightWidth: 1.5,
-    borderColor: 'rgba(106, 83, 153, 0.4)',
-  },
-  cornerBL: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    width: 16,
-    height: 16,
-    borderBottomWidth: 1.5,
-    borderLeftWidth: 1.5,
-    borderColor: 'rgba(0, 240, 255, 0.3)',
-  },
-  cornerBR: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    width: 16,
-    height: 16,
-    borderBottomWidth: 1.5,
-    borderRightWidth: 1.5,
-    borderColor: 'rgba(0, 240, 255, 0.3)',
-  },
-
   stateBadge: {
     alignItems: 'center',
     gap: 3,
-    marginTop: 4,
+    marginTop: 8,
     paddingHorizontal: 14,
     paddingVertical: 6,
-    backgroundColor: 'rgba(17, 16, 24, 0.8)',
+    backgroundColor: 'rgba(17, 16, 24, 0.85)',
     borderRadius: 16,
     borderWidth: 1,
     borderColor: Colors.surfaceBorder,
@@ -246,7 +196,7 @@ const styles = StyleSheet.create({
   },
 
   greetingSection: {
-    paddingVertical: 12,
+    paddingVertical: 10,
   },
   greetingTime: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',
@@ -288,9 +238,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
-  vitalIcon: {
-    fontSize: 12,
-  },
   vitalLabel: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',
     fontSize: 8.5,
@@ -300,7 +247,7 @@ const styles = StyleSheet.create({
   },
   vitalValue: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '700',
     color: Colors.text.primary,
     marginTop: 2,
@@ -347,10 +294,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  tileIcon: {
-    fontSize: 16,
-    color: Colors.cyan.primary,
-  },
   tileInfo: {
     flex: 1,
   },
@@ -364,10 +307,5 @@ const styles = StyleSheet.create({
     fontSize: 10.5,
     color: Colors.text.dim,
     marginTop: 1,
-  },
-  tileArrow: {
-    fontSize: 18,
-    color: Colors.text.dim,
-    fontFamily: 'JetBrains Mono, Menlo, monospace',
   },
 });

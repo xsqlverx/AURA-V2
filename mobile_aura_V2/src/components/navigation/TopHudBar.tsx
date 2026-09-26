@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useNavigation, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Colors } from '../../constants/colors';
 import { Theme } from '../../constants/theme';
@@ -32,7 +33,11 @@ export function TopHudBar({ title = 'AURA', subtitle, showBack = false }: TopHud
     <View style={styles.container}>
       <View style={styles.leftGroup}>
         <Pressable style={styles.menuBtn} onPress={handleMenu}>
-          <Text style={styles.menuIcon}>{showBack ? '←' : '☰'}</Text>
+          <Ionicons
+            name={showBack ? 'arrow-back-outline' : 'menu-outline'}
+            size={20}
+            color={Colors.cyan.primary}
+          />
         </Pressable>
         <View style={styles.titleCol}>
           <View style={styles.brandRow}>
@@ -81,7 +86,7 @@ export function TopHudBar({ title = 'AURA', subtitle, showBack = false }: TopHud
               { color: pcConnected ? Colors.green.bright : Colors.text.dim },
             ]}
           >
-            {pcConnected ? 'PC LINKED' : 'OFFLINE'}
+            {pcConnected ? 'PC LINKED' : 'STANDALONE'}
           </Text>
         </View>
       </View>
@@ -96,7 +101,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 10,
-    backgroundColor: 'rgba(8, 8, 12, 0.85)',
+    backgroundColor: 'rgba(8, 8, 12, 0.9)',
     borderBottomWidth: 1,
     borderBottomColor: Colors.surfaceBorder,
   },
@@ -114,10 +119,6 @@ const styles = StyleSheet.create({
     borderColor: Colors.surfaceBorder,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  menuIcon: {
-    fontSize: 16,
-    color: Colors.cyan.primary,
   },
   titleCol: {
     justifyContent: 'center',

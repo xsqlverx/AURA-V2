@@ -13,22 +13,22 @@ export interface ProviderModel {
 }
 
 export const PRESET_MODELS: ProviderModel[] = [
-  // Groq (Ultra-fast inference, generous free tier)
+  // Groq (Ultra-fast inference, generous free tier for tools & action planning)
   {
     id: 'llama-3.3-70b-versatile',
-    name: 'Llama 3.3 70B Versatile',
+    name: 'Llama 3.3 70B (Groq)',
     provider: 'groq',
     isFree: true,
     contextLength: '128k',
-    description: 'Ultra fast general reasoning & tool executor',
+    description: 'Sub-second speed — ideal for tool execution & action planning',
   },
   {
     id: 'mixtral-8x7b-32768',
-    name: 'Mixtral 8x7B',
+    name: 'Mixtral 8x7B (Groq)',
     provider: 'groq',
     isFree: true,
     contextLength: '32k',
-    description: 'High throughput MoE model',
+    description: 'High throughput fast router',
   },
   // OpenRouter Free Models
   {
@@ -43,11 +43,11 @@ export const PRESET_MODELS: ProviderModel[] = [
     name: 'Llama 3.3 70B (OpenRouter)',
     provider: 'openrouter',
     isFree: true,
-    description: 'High capacity free instruction model',
+    description: 'Generous free tier for deep conversation',
   },
   {
     id: 'google/gemini-2.0-flash-exp:free',
-    name: 'Gemini 2.0 Flash',
+    name: 'Gemini 2.0 Flash (OpenRouter)',
     provider: 'openrouter',
     isFree: true,
     description: 'Ultra-low latency Google flagship',
@@ -66,13 +66,16 @@ export const PRESET_MODELS: ProviderModel[] = [
     name: 'Cerebras Llama 3.3 70B',
     provider: 'cerebras',
     isFree: true,
-    description: 'Sub-second wafer-scale engine speed',
+    description: 'Wafer-scale engine sub-second inference',
   },
 ];
 
 interface SettingsState {
-  activeProvider: LLMProvider;
-  llmModel: string;
+  // Dual-Provider Split
+  toolProvider: LLMProvider;
+  toolModel: string;
+  chatProvider: LLMProvider;
+  chatModel: string;
   
   // API Keys per provider
   groqApiKey: string;
@@ -92,7 +95,7 @@ interface SettingsState {
   pcBackendUrl: string;
   mobileApiKey: string;
 
-  // Automation & Overlay
+  // Automation & Permissions
   overlayEnabled: boolean;
   accessibilityEnabled: boolean;
 
@@ -100,28 +103,37 @@ interface SettingsState {
   initialized: boolean;
 
   // Actions
-  setActiveProvider: (provider: LLMProvider) => void;
-  setModel: (model: string) => void;
+  setToolProvider: (provider: LLMProvider) => void;
+  setToolModel: (model: string) => void;
+  setChatProvider: (provider: LLMProvider) => void;
+  setChatModel: (model: string) => void;
+
   setGroqApiKey: (key: string) => void;
   setOpenrouterApiKey: (key: string) => void;
   setNvidiaApiKey: (key: string) => void;
   setCerebrasApiKey: (key: string) => void;
   setCustomConfig: (url: string, key: string) => void;
+
   setTtsEnabled: (enabled: boolean) => void;
   setTtsSpeed: (speed: number) => void;
   setVoiceGender: (gender: 'female' | 'male') => void;
   setPcBackendUrl: (url: string) => void;
   setOverlayEnabled: (enabled: boolean) => void;
   setAccessibilityEnabled: (enabled: boolean) => void;
+
   loadSettings: () => Promise<void>;
-  getActiveApiKey: () => string;
+  getApiKeyForProvider: (provider: LLMProvider) => string;
 }
 
-const STORAGE_KEY = 'aura_v2_settings';
+const STORAGE_KEY = 'aura_v2_settings_split';
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
-  activeProvider: 'openrouter',
-  llmModel: 'openrouter/free',
+  // Default: Tool Provider uses Groq (fastest free tier), Chat uses OpenRouter
+  toolProvider: 'groq',
+  toolModel: 'llama-3.3-70b-versatile',
+  chatProvider: 'openrouter',
+  chatModel: 'openrouter/free',
+
   groqApiKey: '',
   openrouterApiKey: '',
   nvidiaApiKey: '',
@@ -141,18 +153,27 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   accessibilityEnabled: false,
   initialized: false,
 
-  setActiveProvider: (provider) => {
-    set({ activeProvider: provider });
-    // Default model if changing provider
-    const firstForProvider = PRESET_MODELS.find((m) => m.provider === provider);
-    if (firstForProvider) {
-      set({ llmModel: firstForProvider.id });
-    }
+  setToolProvider: (provider) => {
+    set({ toolProvider: provider });
+    const first = PRESET_MODELS.find((m) => m.provider === provider);
+    if (first) set({ toolModel: first.id });
     persistSettings(get());
   },
 
-  setModel: (model) => {
-    set({ llmModel: model });
+  setToolModel: (model) => {
+    set({ toolModel: model });
+    persistSettings(get());
+  },
+
+  setChatProvider: (provider) => {
+    set({ chatProvider: provider });
+    const first = PRESET_MODELS.find((m) => m.provider === provider);
+    if (first) set({ chatModel: first.id });
+    persistSettings(get());
+  },
+
+  setChatModel: (model) => {
+    set({ chatModel: model });
     persistSettings(get());
   },
 
@@ -211,9 +232,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     persistSettings(get());
   },
 
-  getActiveApiKey: () => {
+  getApiKeyForProvider: (provider: LLMProvider) => {
     const s = get();
-    switch (s.activeProvider) {
+    switch (provider) {
       case 'groq':
         return s.groqApiKey;
       case 'nvidia':
@@ -234,8 +255,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       if (raw) {
         const data = JSON.parse(raw);
         set({
-          activeProvider: data.activeProvider ?? 'openrouter',
-          llmModel: data.llmModel ?? 'openrouter/free',
+          toolProvider: data.toolProvider ?? 'groq',
+          toolModel: data.toolModel ?? 'llama-3.3-70b-versatile',
+          chatProvider: data.chatProvider ?? 'openrouter',
+          chatModel: data.chatModel ?? 'openrouter/free',
           groqApiKey: data.groqApiKey ?? '',
           openrouterApiKey: data.openrouterApiKey ?? '',
           nvidiaApiKey: data.nvidiaApiKey ?? '',
@@ -266,8 +289,10 @@ async function persistSettings(state: SettingsState) {
     await AsyncStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
-        activeProvider: state.activeProvider,
-        llmModel: state.llmModel,
+        toolProvider: state.toolProvider,
+        toolModel: state.toolModel,
+        chatProvider: state.chatProvider,
+        chatModel: state.chatModel,
         groqApiKey: state.groqApiKey,
         openrouterApiKey: state.openrouterApiKey,
         nvidiaApiKey: state.nvidiaApiKey,

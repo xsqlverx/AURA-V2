@@ -9,6 +9,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useSettingsStore, PRESET_MODELS, type LLMProvider } from '../../src/store/settingsStore';
 import { Colors } from '../../src/constants/colors';
@@ -20,18 +21,20 @@ import { Toast } from '../../src/components/shared/Toast';
 import { checkPcConnection } from '../../src/api/client';
 import { speak } from '../../src/services/tts';
 
-const PROVIDERS: { id: LLMProvider; name: string; icon: string; freeInfo: string }[] = [
-  { id: 'groq', name: 'Groq', icon: '⚡', freeInfo: 'Ultra-fast 70B' },
-  { id: 'openrouter', name: 'OpenRouter', icon: '🌐', freeInfo: 'Generous free tier' },
-  { id: 'nvidia', name: 'Nvidia NIM', icon: '🟢', freeInfo: 'Nemotron & Llama' },
-  { id: 'cerebras', name: 'Cerebras', icon: '🚀', freeInfo: 'Wafer speed' },
-  { id: 'custom', name: 'Custom URL', icon: '🛠️', freeInfo: 'Local / OpenAI API' },
+const PROVIDERS: { id: LLMProvider; name: string; iconName: keyof typeof Ionicons.glyphMap; freeInfo: string }[] = [
+  { id: 'groq', name: 'Groq', iconName: 'flash-outline', freeInfo: 'Ultra-fast 70B' },
+  { id: 'openrouter', name: 'OpenRouter', iconName: 'globe-outline', freeInfo: 'Generous free tier' },
+  { id: 'nvidia', name: 'Nvidia NIM', iconName: 'hardware-chip-outline', freeInfo: 'Nemotron & Llama' },
+  { id: 'cerebras', name: 'Cerebras', iconName: 'rocket-outline', freeInfo: 'Wafer speed' },
+  { id: 'custom', name: 'Custom URL', iconName: 'construct-outline', freeInfo: 'Local / OpenAI API' },
 ];
 
 export default function SettingsScreen() {
   const {
-    activeProvider,
-    llmModel,
+    toolProvider,
+    toolModel,
+    chatProvider,
+    chatModel,
     groqApiKey,
     openrouterApiKey,
     nvidiaApiKey,
@@ -42,9 +45,10 @@ export default function SettingsScreen() {
     ttsSpeed,
     voiceGender,
     pcBackendUrl,
-    mobileApiKey,
-    setActiveProvider,
-    setModel,
+    setToolProvider,
+    setToolModel,
+    setChatProvider,
+    setChatModel,
     setGroqApiKey,
     setOpenrouterApiKey,
     setNvidiaApiKey,
@@ -123,33 +127,36 @@ export default function SettingsScreen() {
       <TopHudBar title="SETTINGS" subtitle="SYSTEM CONFIG MATRIX" />
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {/* AI LLM Brain Matrix */}
+        {/* 1. Tool Execution Engine Card */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
-            <View style={[styles.cardIconBox, { backgroundColor: 'rgba(106, 83, 153, 0.2)' }]}>
-              <Text style={styles.cardIcon}>🧠</Text>
+            <View style={[styles.cardIconBox, { backgroundColor: 'rgba(0, 240, 255, 0.12)' }]}>
+              <Ionicons name="flash-outline" size={20} color={Colors.cyan.primary} />
             </View>
             <View style={styles.cardHeaderText}>
-              <Text style={styles.cardTitle}>Intelligence Core</Text>
-              <Text style={styles.cardSubtitle}>Multi-Provider LLM Routing</Text>
+              <Text style={styles.cardTitle}>Tool & Action Planner Engine</Text>
+              <Text style={styles.cardSubtitle}>Sub-second execution for device tools & plans</Text>
             </View>
           </View>
 
-          {/* Provider Selection Tabs */}
-          <Text style={styles.fieldLabel}>ACTIVE PROVIDER</Text>
+          <Text style={styles.fieldLabel}>TOOL PROVIDER</Text>
           <View style={styles.providerGrid}>
             {PROVIDERS.map((p) => {
-              const isSelected = activeProvider === p.id;
+              const isSelected = toolProvider === p.id;
               return (
                 <Pressable
                   key={p.id}
                   style={[styles.providerCard, isSelected && styles.providerCardActive]}
                   onPress={() => {
                     try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
-                    setActiveProvider(p.id);
+                    setToolProvider(p.id);
                   }}
                 >
-                  <Text style={styles.providerIcon}>{p.icon}</Text>
+                  <Ionicons
+                    name={p.iconName}
+                    size={16}
+                    color={isSelected ? Colors.cyan.primary : Colors.text.dim}
+                  />
                   <Text style={[styles.providerName, isSelected && styles.providerNameActive]}>
                     {p.name}
                   </Text>
@@ -158,152 +165,128 @@ export default function SettingsScreen() {
               );
             })}
           </View>
+        </View>
 
-          {/* Active Provider Key Inputs */}
-          {activeProvider === 'groq' && (
-            <View style={styles.keySection}>
-              <Text style={styles.fieldLabel}>GROQ API KEY</Text>
-              <TextInput
-                style={styles.input}
-                value={localGroqKey}
-                onChangeText={setLocalGroqKey}
-                onBlur={() => setGroqApiKey(localGroqKey)}
-                placeholder="gsk_..."
-                placeholderTextColor={Colors.text.dim}
-                secureTextEntry={!showKeys}
-                autoCapitalize="none"
-              />
+        {/* 2. Conversational Brain Engine Card */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <View style={[styles.cardIconBox, { backgroundColor: 'rgba(106, 83, 153, 0.2)' }]}>
+              <Ionicons name="chatbubbles-outline" size={20} color={Colors.purple.light} />
             </View>
-          )}
-
-          {activeProvider === 'openrouter' && (
-            <View style={styles.keySection}>
-              <Text style={styles.fieldLabel}>OPENROUTER API KEY</Text>
-              <TextInput
-                style={styles.input}
-                value={localOrKey}
-                onChangeText={setLocalOrKey}
-                onBlur={() => setOpenrouterApiKey(localOrKey)}
-                placeholder="sk-or-v1-..."
-                placeholderTextColor={Colors.text.dim}
-                secureTextEntry={!showKeys}
-                autoCapitalize="none"
-              />
+            <View style={styles.cardHeaderText}>
+              <Text style={styles.cardTitle}>Conversational Chat Brain</Text>
+              <Text style={styles.cardSubtitle}>Dialogue & general reasoning provider</Text>
             </View>
-          )}
+          </View>
 
-          {activeProvider === 'nvidia' && (
-            <View style={styles.keySection}>
-              <Text style={styles.fieldLabel}>NVIDIA NIM API KEY</Text>
-              <TextInput
-                style={styles.input}
-                value={localNvidiaKey}
-                onChangeText={setLocalNvidiaKey}
-                onBlur={() => setNvidiaApiKey(localNvidiaKey)}
-                placeholder="nvapi-..."
-                placeholderTextColor={Colors.text.dim}
-                secureTextEntry={!showKeys}
-                autoCapitalize="none"
-              />
-            </View>
-          )}
-
-          {activeProvider === 'cerebras' && (
-            <View style={styles.keySection}>
-              <Text style={styles.fieldLabel}>CEREBRAS API KEY</Text>
-              <TextInput
-                style={styles.input}
-                value={localCerebrasKey}
-                onChangeText={setLocalCerebrasKey}
-                onBlur={() => setCerebrasApiKey(localCerebrasKey)}
-                placeholder="csk-..."
-                placeholderTextColor={Colors.text.dim}
-                secureTextEntry={!showKeys}
-                autoCapitalize="none"
-              />
-            </View>
-          )}
-
-          {activeProvider === 'custom' && (
-            <View style={styles.keySection}>
-              <Text style={styles.fieldLabel}>CUSTOM ENDPOINT URL</Text>
-              <TextInput
-                style={styles.input}
-                value={localCustomUrl}
-                onChangeText={setLocalCustomUrl}
-                onBlur={() => setCustomConfig(localCustomUrl, localCustomKey)}
-                placeholder="https://your-endpoint/v1/chat/completions"
-                placeholderTextColor={Colors.text.dim}
-                autoCapitalize="none"
-              />
-              <Text style={[styles.fieldLabel, { marginTop: 8 }]}>CUSTOM API KEY (OPTIONAL)</Text>
-              <TextInput
-                style={styles.input}
-                value={localCustomKey}
-                onChangeText={setLocalCustomKey}
-                onBlur={() => setCustomConfig(localCustomUrl, localCustomKey)}
-                placeholder="Bearer key..."
-                placeholderTextColor={Colors.text.dim}
-                secureTextEntry={!showKeys}
-                autoCapitalize="none"
-              />
-            </View>
-          )}
-
-          <Pressable style={styles.showKeyBtn} onPress={() => setShowKeys(!showKeys)}>
-            <Text style={styles.showKeyText}>{showKeys ? '🙈 Hide API Keys' : '👁 Show API Keys'}</Text>
-          </Pressable>
-
-          {/* Model Presets */}
-          <Text style={styles.fieldLabel}>AVAILABLE PRESET MODELS</Text>
-          <View style={styles.modelList}>
-            {PRESET_MODELS.filter(
-              (m) => activeProvider === 'custom' || m.provider === activeProvider
-            ).map((model) => {
-              const isCurrent = llmModel === model.id;
+          <Text style={styles.fieldLabel}>CHAT PROVIDER</Text>
+          <View style={styles.providerGrid}>
+            {PROVIDERS.map((p) => {
+              const isSelected = chatProvider === p.id;
               return (
                 <Pressable
-                  key={model.id}
-                  style={[styles.modelItem, isCurrent && styles.modelItemActive]}
+                  key={p.id}
+                  style={[styles.providerCard, isSelected && styles.providerCardActive]}
                   onPress={() => {
                     try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
-                    setModel(model.id);
+                    setChatProvider(p.id);
                   }}
                 >
-                  <View style={styles.modelInfo}>
-                    <View style={styles.modelHeaderRow}>
-                      <Text style={[styles.modelTitle, isCurrent && { color: Colors.cyan.primary }]}>
-                        {model.name}
-                      </Text>
-                      {model.isFree && (
-                        <View style={styles.freeBadge}>
-                          <Text style={styles.freeBadgeText}>FREE TIER</Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text style={styles.modelDesc}>{model.description}</Text>
-                  </View>
-                  {isCurrent && <Text style={styles.checkIcon}>✓</Text>}
+                  <Ionicons
+                    name={p.iconName}
+                    size={16}
+                    color={isSelected ? Colors.purple.light : Colors.text.dim}
+                  />
+                  <Text style={[styles.providerName, isSelected && styles.providerNameActive]}>
+                    {p.name}
+                  </Text>
+                  <Text style={styles.providerSub} numberOfLines={1}>{p.freeInfo}</Text>
                 </Pressable>
               );
             })}
           </View>
         </View>
 
-        {/* Voice & Neural Synthesis */}
+        {/* 3. API Keys Management Card */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <View style={[styles.cardIconBox, { backgroundColor: 'rgba(255, 215, 0, 0.12)' }]}>
+              <Ionicons name="key-outline" size={20} color={Colors.gold.primary} />
+            </View>
+            <View style={styles.cardHeaderText}>
+              <Text style={styles.cardTitle}>API Keys & Endpoints</Text>
+              <Text style={styles.cardSubtitle}>Configure authentication for active providers</Text>
+            </View>
+          </View>
+
+          <Text style={styles.fieldLabel}>GROQ API KEY (Recommended for Tools)</Text>
+          <TextInput
+            style={styles.input}
+            value={localGroqKey}
+            onChangeText={setLocalGroqKey}
+            onBlur={() => setGroqApiKey(localGroqKey)}
+            placeholder="gsk_..."
+            placeholderTextColor={Colors.text.dim}
+            secureTextEntry={!showKeys}
+            autoCapitalize="none"
+          />
+
+          <Text style={styles.fieldLabel}>OPENROUTER API KEY</Text>
+          <TextInput
+            style={styles.input}
+            value={localOrKey}
+            onChangeText={setLocalOrKey}
+            onBlur={() => setOpenrouterApiKey(localOrKey)}
+            placeholder="sk-or-v1-..."
+            placeholderTextColor={Colors.text.dim}
+            secureTextEntry={!showKeys}
+            autoCapitalize="none"
+          />
+
+          <Text style={styles.fieldLabel}>NVIDIA NIM API KEY</Text>
+          <TextInput
+            style={styles.input}
+            value={localNvidiaKey}
+            onChangeText={setLocalNvidiaKey}
+            onBlur={() => setNvidiaApiKey(localNvidiaKey)}
+            placeholder="nvapi-..."
+            placeholderTextColor={Colors.text.dim}
+            secureTextEntry={!showKeys}
+            autoCapitalize="none"
+          />
+
+          <Text style={styles.fieldLabel}>CEREBRAS API KEY</Text>
+          <TextInput
+            style={styles.input}
+            value={localCerebrasKey}
+            onChangeText={setLocalCerebrasKey}
+            onBlur={() => setCerebrasApiKey(localCerebrasKey)}
+            placeholder="csk-..."
+            placeholderTextColor={Colors.text.dim}
+            secureTextEntry={!showKeys}
+            autoCapitalize="none"
+          />
+
+          <Pressable style={styles.showKeyBtn} onPress={() => setShowKeys(!showKeys)}>
+            <Ionicons name={showKeys ? 'eye-off-outline' : 'eye-outline'} size={14} color={Colors.purple.light} />
+            <Text style={styles.showKeyText}>{showKeys ? 'Hide Keys' : 'Show Keys'}</Text>
+          </Pressable>
+        </View>
+
+        {/* 4. Voice & Neural Audio */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <View style={[styles.cardIconBox, { backgroundColor: 'rgba(0, 240, 255, 0.12)' }]}>
-              <Text style={styles.cardIcon}>🔊</Text>
+              <Ionicons name="volume-high-outline" size={20} color={Colors.cyan.primary} />
             </View>
             <View style={styles.cardHeaderText}>
               <Text style={styles.cardTitle}>Voice Synthesis</Text>
-              <Text style={styles.cardSubtitle}>Neural Audio Streaming Engine</Text>
+              <Text style={styles.cardSubtitle}>Instant speech streaming & pitch calibration</Text>
             </View>
           </View>
 
           <View style={styles.toggleRow}>
-            <Text style={styles.toggleLabel}>Voice Response Enabled</Text>
+            <Text style={styles.toggleLabel}>Voice Output Enabled</Text>
             <Switch
               value={ttsEnabled}
               onValueChange={setTtsEnabled}
@@ -320,13 +303,13 @@ export default function SettingsScreen() {
                   style={[styles.genderBtn, voiceGender === 'female' && styles.genderBtnActive]}
                   onPress={() => setVoiceGender('female')}
                 >
-                  <Text style={styles.genderText}>🌸 Ava / Scarlett (Warm Neural)</Text>
+                  <Text style={styles.genderText}>Ava / Scarlett (Warm Neural)</Text>
                 </Pressable>
                 <Pressable
                   style={[styles.genderBtn, voiceGender === 'male' && styles.genderBtnActive]}
                   onPress={() => setVoiceGender('male')}
                 >
-                  <Text style={styles.genderText}>🤖 JARVIS / Guy (Synthetic)</Text>
+                  <Text style={styles.genderText}>JARVIS / Guy (Synthetic)</Text>
                 </Pressable>
               </View>
 
@@ -351,17 +334,18 @@ export default function SettingsScreen() {
               </View>
 
               <Pressable style={styles.testVoiceBtn} onPress={handleTestVoice}>
-                <Text style={styles.testVoiceText}>▶ TEST VOICE SYNTHESIS</Text>
+                <Ionicons name="play-outline" size={14} color={Colors.cyan.bright} />
+                <Text style={styles.testVoiceText}>TEST INSTANT SPEECH</Text>
               </Pressable>
             </>
           )}
         </View>
 
-        {/* PC Backend Bridge */}
+        {/* 5. PC Backend Link */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <View style={[styles.cardIconBox, { backgroundColor: 'rgba(16, 185, 129, 0.12)' }]}>
-              <Text style={styles.cardIcon}>💻</Text>
+              <Ionicons name="desktop-outline" size={20} color={Colors.green.primary} />
             </View>
             <View style={styles.cardHeaderText}>
               <Text style={styles.cardTitle}>Desktop Companion Link</Text>
@@ -369,7 +353,7 @@ export default function SettingsScreen() {
             </View>
           </View>
 
-          <Text style={styles.fieldLabel}>PC IP / ENDPOINT URL</Text>
+          <Text style={styles.fieldLabel}>PC IP / BACKEND ENDPOINT</Text>
           <TextInput
             style={styles.input}
             value={localPcUrl}
@@ -385,17 +369,9 @@ export default function SettingsScreen() {
             onPress={handleTestPc}
             disabled={isTestingPc}
           >
-            <Text style={styles.testPcText}>{isTestingPc ? 'PINGING...' : '⚡ TEST PC LINK'}</Text>
+            <Ionicons name="pulse-outline" size={14} color={Colors.green.bright} />
+            <Text style={styles.testPcText}>{isTestingPc ? 'PINGING...' : 'TEST PC LINK'}</Text>
           </Pressable>
-        </View>
-
-        {/* Device Information */}
-        <View style={styles.card}>
-          <Text style={styles.infoTitle}>AURA MOBILE MATRIX</Text>
-          <Text style={styles.infoDetail}>Hardware: Samsung Galaxy F15 // One UI</Text>
-          <Text style={styles.infoDetail}>Architecture: React Native 0.86.3 // Expo SDK 57</Text>
-          <Text style={styles.infoDetail}>On-Device Routing: Needle SLM Engine</Text>
-          <Text style={styles.infoDetail}>Build: v2.0.0 (Phase 1 Complete)</Text>
         </View>
 
         <View style={{ height: 110 }} />
@@ -444,9 +420,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  cardIcon: {
-    fontSize: 18,
-  },
   cardHeaderText: {
     flex: 1,
   },
@@ -490,9 +463,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(106, 83, 153, 0.22)',
     borderColor: Colors.purple.primary,
   },
-  providerIcon: {
-    fontSize: 16,
-  },
   providerName: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',
     fontSize: 12,
@@ -507,10 +477,6 @@ const styles = StyleSheet.create({
     color: Colors.text.dim,
   },
 
-  keySection: {
-    marginTop: 4,
-    gap: 4,
-  },
   input: {
     backgroundColor: Colors.surface,
     borderWidth: 1,
@@ -523,6 +489,9 @@ const styles = StyleSheet.create({
     color: Colors.text.primary,
   },
   showKeyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     alignSelf: 'flex-start',
     paddingVertical: 4,
   },
@@ -530,61 +499,6 @@ const styles = StyleSheet.create({
     fontFamily: 'JetBrains Mono, Menlo, monospace',
     fontSize: 10,
     color: Colors.purple.light,
-  },
-
-  modelList: {
-    gap: 6,
-  },
-  modelItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.surfaceBorder,
-    borderRadius: 10,
-    padding: 10,
-  },
-  modelItemActive: {
-    backgroundColor: 'rgba(0, 240, 255, 0.06)',
-    borderColor: Colors.cyan.dim,
-  },
-  modelInfo: {
-    flex: 1,
-    gap: 2,
-  },
-  modelHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  modelTitle: {
-    fontFamily: 'JetBrains Mono, Menlo, monospace',
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.text.primary,
-  },
-  freeBadge: {
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  freeBadgeText: {
-    fontFamily: 'JetBrains Mono, Menlo, monospace',
-    fontSize: 8,
-    fontWeight: '700',
-    color: Colors.green.bright,
-  },
-  modelDesc: {
-    fontSize: 10,
-    color: Colors.text.dim,
-  },
-  checkIcon: {
-    fontFamily: 'JetBrains Mono, Menlo, monospace',
-    fontSize: 14,
-    color: Colors.cyan.primary,
-    fontWeight: '700',
-    marginLeft: 8,
   },
 
   toggleRow: {
@@ -645,12 +559,15 @@ const styles = StyleSheet.create({
   },
 
   testVoiceBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
     backgroundColor: 'rgba(0, 240, 255, 0.08)',
     borderWidth: 1,
     borderColor: Colors.cyan.dim,
     borderRadius: 10,
     paddingVertical: 9,
-    alignItems: 'center',
     marginTop: 6,
   },
   testVoiceText: {
@@ -662,12 +579,15 @@ const styles = StyleSheet.create({
   },
 
   testPcBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
     backgroundColor: 'rgba(16, 185, 129, 0.12)',
     borderWidth: 1,
     borderColor: Colors.green.dim,
     borderRadius: 10,
     paddingVertical: 9,
-    alignItems: 'center',
     marginTop: 4,
   },
   testPcText: {
@@ -676,18 +596,5 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.green.bright,
     letterSpacing: 1,
-  },
-
-  infoTitle: {
-    fontFamily: 'JetBrains Mono, Menlo, monospace',
-    fontSize: 11,
-    fontWeight: '700',
-    color: Colors.purple.light,
-    letterSpacing: 1,
-  },
-  infoDetail: {
-    fontFamily: 'JetBrains Mono, Menlo, monospace',
-    fontSize: 10,
-    color: Colors.text.dim,
   },
 });

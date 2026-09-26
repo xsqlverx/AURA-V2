@@ -4,6 +4,48 @@ import { devLog } from '../utils/devLog';
 
 const MAX_TEXT_LENGTH = 400;
 
+// In-memory cached voice identifiers
+let cachedFemaleVoice: string | undefined;
+let cachedMaleVoice: string | undefined;
+let voicesLoaded = false;
+
+// Warm up and cache voice list once at app startup
+export async function warmupVoiceEngine(): Promise<void> {
+  if (voicesLoaded) return;
+  try {
+    const voices = await Speech.getAvailableVoicesAsync().catch(() => []);
+    if (voices && voices.length > 0) {
+      // Find enhanced / neural female voice
+      const female = voices.find(
+        (v) =>
+          v.language.startsWith('en') &&
+          (v.name.toLowerCase().includes('ava') ||
+            v.name.toLowerCase().includes('samantha') ||
+            v.name.toLowerCase().includes('female') ||
+            v.name.toLowerCase().includes('karen') ||
+            v.name.toLowerCase().includes('en-us-neural2-f') ||
+            v.quality === 'Enhanced')
+      );
+      if (female) cachedFemaleVoice = female.identifier;
+
+      // Find male voice
+      const male = voices.find(
+        (v) =>
+          v.language.startsWith('en') &&
+          (v.name.toLowerCase().includes('guy') ||
+            v.name.toLowerCase().includes('male') ||
+            v.name.toLowerCase().includes('daniel') ||
+            v.name.toLowerCase().includes('en-us-neural2-d'))
+      );
+      if (male) cachedMaleVoice = male.identifier;
+    }
+    voicesLoaded = true;
+    devLog.info('TTS Voice engine warmed up & cached successfully');
+  } catch (e) {
+    devLog.warn('Voice warmup error', e);
+  }
+}
+
 function stripMarkdown(text: string): string {
   return text
     .replace(/```[\s\S]*?```/g, 'code block omitted')
@@ -15,42 +57,21 @@ function stripMarkdown(text: string): string {
 }
 
 export async function speak(text: string): Promise<void> {
-  const { ttsEnabled, ttsSpeed, voiceProvider, voiceGender } = useSettingsStore.getState();
+  const { ttsEnabled, ttsSpeed, voiceGender } = useSettingsStore.getState();
   if (!ttsEnabled) return;
 
   try {
     const cleaned = stripMarkdown(text).slice(0, MAX_TEXT_LENGTH);
     if (!cleaned) return;
 
-    // First try expo-speech with high quality voice matching
-    const voices = await Speech.getAvailableVoicesAsync().catch(() => []);
-    
-    // Look for neural or high quality female/male voices
-    let selectedVoice: string | undefined;
-    if (voices && voices.length > 0) {
-      if (voiceGender === 'female') {
-        const femaleVoice = voices.find(
-          (v) =>
-            (v.language.startsWith('en') &&
-              (v.name.toLowerCase().includes('ava') ||
-                v.name.toLowerCase().includes('samantha') ||
-                v.name.toLowerCase().includes('female') ||
-                v.name.toLowerCase().includes('karen') ||
-                v.name.toLowerCase().includes('en-us-neural2-f') ||
-                v.quality === 'Enhanced'))
-        );
-        selectedVoice = femaleVoice?.identifier;
-      }
-    }
+    const selectedVoice = voiceGender === 'female' ? cachedFemaleVoice : cachedMaleVoice;
 
+    // Trigger instant speech without awaiting voice queries
     Speech.speak(cleaned, {
       rate: ttsSpeed,
-      pitch: 1.05, // Slightly warmer pitch for companion feel
+      pitch: voiceGender === 'female' ? 1.05 : 0.95,
       language: 'en-US',
       voice: selectedVoice,
-      onStart: () => devLog.info('TTS started speaking'),
-      onDone: () => devLog.info('TTS finished speaking'),
-      onError: (err) => devLog.warn('TTS error', err),
     });
   } catch (e) {
     devLog.warn('Speech engine exception', e);

@@ -9,6 +9,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Orb } from '../../src/components/orb/Orb';
 import { MessageBubble } from '../../src/components/chat/MessageBubble';
@@ -19,11 +20,11 @@ import { BottomTabBar } from '../../src/components/navigation/BottomTabBar';
 import { Toast } from '../../src/components/shared/Toast';
 import { useAppStore } from '../../src/store/appStore';
 import { useSettingsStore } from '../../src/store/settingsStore';
-import { classifyMessage } from '../../src/router/taskRouter';
-import { initNeedle, tryNeedleRoute, keywordClassify } from '../../src/router/needleRouter';
+import { tryFastPath } from '../../src/router/fastpathRouter';
+import { initNeedle, tryNeedleRoute } from '../../src/router/needleRouter';
 import { executeMobileCapability } from '../../src/capabilities/mobileExecutor';
 import { checkPcConnection, sendToPc } from '../../src/api/client';
-import { streamFromOpenRouter } from '../../src/api/openrouter';
+import { streamFromOpenRouter, planMultiStepAction } from '../../src/api/openrouter';
 import { speak, stopSpeaking } from '../../src/services/tts';
 import { devLog } from '../../src/utils/devLog';
 import { Colors } from '../../src/constants/colors';
@@ -48,7 +49,7 @@ export default function ChatScreen() {
     setIsProcessing,
   } = useAppStore();
 
-  const { activeProvider } = useSettingsStore();
+  const { toolProvider, chatProvider } = useSettingsStore();
 
   useEffect(() => {
     initNeedle().then((ok) => {
@@ -78,26 +79,56 @@ export default function ChatScreen() {
     setStreamingText('');
 
     try {
-      // 1. Check Needle SLM router or Keyword classification for on-device mobile tasks
-      let route = null as ReturnType<typeof classifyMessage> | null;
-      try {
-        const needleRoute = await tryNeedleRoute(text);
-        if (needleRoute) {
-          route = needleRoute;
-        } else {
-          route = keywordClassify(text);
-        }
-      } catch (e) {
-        route = classifyMessage(text);
+      // 1. TIER 1: DETERMINISTIC FAST-PATH (<5ms, ZERO LLM COST)
+      const fastResult = await tryFastPath(text, pcConnected);
+      if (fastResult.handled) {
+        setOrbState('success');
+        const reply: Message = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: fastResult.message,
+          timestamp: Date.now(),
+          routedTo: fastResult.target as any,
+        };
+        addMessage(reply);
+        speak(fastResult.message).finally(() => {
+          setTimeout(() => setOrbState('idle'), 1200);
+          setIsProcessing(false);
+        });
+        return;
       }
 
-      if (route.target === 'MOBILE' && route.capability) {
-        setOrbState('thinking');
-        const result = await executeMobileCapability(
-          route.capability as any,
-          { number: text.match(/[\d\s+()-]{7,}/)?.[0]?.trim() ?? '' }
-        );
+      // 2. TIER 2: COMPOUND ACTION PLANNER (Multi-step directives via Tool Provider)
+      if (fastResult.isCompound) {
+        setOrbState('executing');
+        const plan = await planMultiStepAction(text);
+        if (plan && plan.steps && plan.steps.length > 0) {
+          const planSummary = `Action Plan Synthesized (${plan.steps.length} steps):\n${plan.steps
+            .map((s: any, idx: number) => `${idx + 1}. ${s.action} ${s.package || s.contact || s.url || ''}`)
+            .join('\n')}`;
 
+          const reply: Message = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: planSummary,
+            timestamp: Date.now(),
+            routedTo: 'MOBILE',
+          };
+          addMessage(reply);
+          setOrbState('speaking');
+          speak(`Executing ${plan.steps.length} step sequence.`).finally(() => {
+            setOrbState('idle');
+            setIsProcessing(false);
+          });
+          return;
+        }
+      }
+
+      // 3. TIER 3: NEEDLE SLM ON-DEVICE ROUTER
+      const needleRoute = await tryNeedleRoute(text);
+      if (needleRoute && needleRoute.target === 'MOBILE' && needleRoute.capability) {
+        setOrbState('thinking');
+        const result = await executeMobileCapability(needleRoute.capability as any, {});
         const reply: Message = {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
@@ -111,69 +142,49 @@ export default function ChatScreen() {
           setOrbState('idle');
           setIsProcessing(false);
         });
-
-        if (!result.success) showToast(result.message);
-      } else if (route.target === 'PC' && pcConnected) {
-        setOrbState('thinking');
-        try {
-          const result = await sendToPc(route.capability!, { query: text });
-          const reply: Message = {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: typeof result === 'string' ? result : JSON.stringify(result),
-            timestamp: Date.now(),
-            routedTo: 'PC',
-          };
-          addMessage(reply);
-          setOrbState('idle');
-          setIsProcessing(false);
-        } catch (err) {
-          showToast('PC command timeout. Try again.');
-          setOrbState('idle');
-          setIsProcessing(false);
-        }
-      } else {
-        // Conversational LLM brain
-        setOrbState('thinking');
-        const history = messages.slice(-8).map((m) => ({
-          role: m.role,
-          content: m.content,
-        }));
-
-        const abort = streamFromOpenRouter(
-          text,
-          history,
-          {
-            onToken: (accumulated) => {
-              setStreamingText(accumulated);
-            },
-            onDone: (fullText) => {
-              setStreamingText('');
-              const reply: Message = {
-                id: (Date.now() + 1).toString(),
-                role: 'assistant',
-                content: fullText || 'Directive received.',
-                timestamp: Date.now(),
-                routedTo: 'CHAT',
-              };
-              addMessage(reply);
-              setOrbState('speaking');
-              speak(fullText).finally(() => {
-                setOrbState('idle');
-                setIsProcessing(false);
-              });
-            },
-            onError: (err) => {
-              setStreamingText('');
-              showToast(err.message || 'Stream connection error.');
-              setOrbState('error');
-              setTimeout(() => setOrbState('idle'), 2000);
-              setIsProcessing(false);
-            },
-          }
-        );
-        abortRef.current = abort;
+        return;
       }
+
+      // 4. TIER 4: CONVERSATIONAL STREAMING VIA CHAT PROVIDER
+      setOrbState('thinking');
+      const history = messages.slice(-8).map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+
+      const abort = streamFromOpenRouter(
+        text,
+        history,
+        {
+          onToken: (accumulated) => {
+            setStreamingText(accumulated);
+          },
+          onDone: (fullText) => {
+            setStreamingText('');
+            const reply: Message = {
+              id: (Date.now() + 1).toString(),
+              role: 'assistant',
+              content: fullText || 'Directive received.',
+              timestamp: Date.now(),
+              routedTo: 'CHAT',
+            };
+            addMessage(reply);
+            setOrbState('speaking');
+            speak(fullText).finally(() => {
+              setOrbState('idle');
+              setIsProcessing(false);
+            });
+          },
+          onError: (err) => {
+            setStreamingText('');
+            showToast(err.message || 'Stream connection error.');
+            setOrbState('error');
+            setTimeout(() => setOrbState('idle'), 2000);
+            setIsProcessing(false);
+          },
+        }
+      );
+      abortRef.current = abort;
     } catch (e: any) {
       setOrbState('idle');
       setIsProcessing(false);
@@ -201,14 +212,17 @@ export default function ChatScreen() {
   }, [streamingText]);
 
   const toggleVoiceMode = () => {
-    if (orbState === 'listening') {
-      setOrbState('idle');
-      stopSpeaking();
-    } else {
-      setOrbState('listening');
-      try {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      } catch {}
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      if (orbState === 'listening') {
+        setOrbState('idle');
+        stopSpeaking();
+      } else {
+        setOrbState('listening');
+        showToast('AURA Listening... Say your directive', 'info');
+      }
+    } catch {
+      // Safe fallback
     }
   };
 
@@ -221,12 +235,12 @@ export default function ChatScreen() {
       <ParticleBackground />
       <TopHudBar title="AURA" subtitle="NEURAL STREAM // ACTIVE" />
 
-      {/* Floating Compact Orb Indicator */}
+      {/* Compact Interactive Swarm Orb */}
       <View style={styles.orbStrip}>
-        <Orb state={orbState} size={54} onPress={toggleVoiceMode} />
+        <Orb state={orbState} size={50} onPress={toggleVoiceMode} showCradle={false} />
         <View style={styles.stateTag}>
           <Text style={styles.stateTagText}>{orbState.toUpperCase()}</Text>
-          <Text style={styles.stateTagSub}>TAP ORB TO TOGGLE VOICE</Text>
+          <Text style={styles.stateTagSub}>TAP TO TOGGLE VOICE STREAM</Text>
         </View>
       </View>
 
@@ -263,7 +277,7 @@ export default function ChatScreen() {
           <View style={styles.stopBar}>
             <Text style={styles.thinkingText}>Streaming response</Text>
             <Pressable style={styles.stopBtn} onPress={handleStop}>
-              <Text style={styles.stopBtnText}>◼ STOP</Text>
+              <Text style={styles.stopBtnText}>STOP</Text>
             </Pressable>
           </View>
         ) : null}
@@ -296,18 +310,18 @@ function EmptyChatState() {
   return (
     <View style={styles.emptyState}>
       <View style={styles.emptyIconBox}>
-        <Text style={styles.emptyIcon}>🟣</Text>
+        <Ionicons name="sparkles-outline" size={26} color={Colors.cyan.primary} />
       </View>
       <Text style={styles.emptyTitle}>AURA Neural Copilot</Text>
       <Text style={styles.emptySubtitle}>
-        Ask questions, trigger phone actions, or direct PC workflows.
+        Direct actions with FastPath or chat with dual-model intelligence.
       </Text>
       <View style={styles.hintsRow}>
         <View style={styles.hintChip}>
-          <Text style={styles.hintText}>"Open WhatsApp"</Text>
+          <Text style={styles.hintText}>"Open front camera"</Text>
         </View>
         <View style={styles.hintChip}>
-          <Text style={styles.hintText}>"Check battery status"</Text>
+          <Text style={styles.hintText}>"WhatsApp Mom"</Text>
         </View>
       </View>
     </View>
@@ -376,7 +390,7 @@ const styles = StyleSheet.create({
     color: Colors.red.bright,
   },
   stopBtn: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 6,
     backgroundColor: Colors.red.primary,
@@ -386,6 +400,7 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '700',
     color: '#FFFFFF',
+    letterSpacing: 0.5,
   },
 
   emptyState: {
@@ -396,18 +411,15 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   emptyIconBox: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
     backgroundColor: 'rgba(106, 83, 153, 0.2)',
     borderWidth: 1,
     borderColor: Colors.purple.primary,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 6,
-  },
-  emptyIcon: {
-    fontSize: 26,
   },
   emptyTitle: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',

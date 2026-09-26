@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { FadeInDown } from 'react-native-reanimated';
+import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../../src/constants/colors';
 import { Theme } from '../../src/constants/theme';
 import { TopHudBar } from '../../src/components/navigation/TopHudBar';
@@ -43,15 +44,18 @@ function MetricCard({
   unit,
   color,
   delay,
+  iconName,
 }: {
   label: string;
   value: string;
   unit: string;
   color: string;
   delay: number;
+  iconName: keyof typeof Ionicons.glyphMap;
 }) {
   return (
     <Animated.View entering={FadeInDown.duration(280).delay(delay)} style={metricStyles.card}>
+      <Ionicons name={iconName} size={16} color={color} style={metricStyles.icon} />
       <Text style={[metricStyles.value, { color }]}>
         {value}
         <Text style={metricStyles.unit}>{unit}</Text>
@@ -71,21 +75,24 @@ const metricStyles = StyleSheet.create({
     borderColor: Colors.surfaceBorder,
     padding: 14,
     alignItems: 'center',
-    gap: 4,
+    gap: 3,
+  },
+  icon: {
+    marginBottom: 2,
   },
   value: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '700',
   },
   unit: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '400',
     color: Colors.text.dim,
   },
   label: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',
-    fontSize: 9.5,
+    fontSize: 9,
     fontWeight: '700',
     color: Colors.text.secondary,
     textTransform: 'uppercase',
@@ -180,7 +187,7 @@ export default function DesktopScreen() {
         {/* Focus App */}
         {focus && (
           <Animated.View entering={FadeInDown.duration(280).delay(50)} style={styles.focusCard}>
-            <Text style={styles.focusIcon}>💻</Text>
+            <Ionicons name="browsers-outline" size={20} color={Colors.cyan.primary} />
             <View style={styles.focusInfo}>
               <Text style={styles.focusLabel}>ACTIVE FOREGROUND WINDOW</Text>
               <Text style={styles.focusApp} numberOfLines={1}>
@@ -204,6 +211,7 @@ export default function DesktopScreen() {
             unit="%"
             color={cpuColor}
             delay={80}
+            iconName="speedometer-outline"
           />
           <MetricCard
             label="RAM USAGE"
@@ -211,6 +219,7 @@ export default function DesktopScreen() {
             unit="%"
             color={ramColor}
             delay={110}
+            iconName="hardware-chip-outline"
           />
           <MetricCard
             label="DISK OCCUPANCY"
@@ -218,6 +227,7 @@ export default function DesktopScreen() {
             unit="%"
             color={diskColor}
             delay={140}
+            iconName="disc-outline"
           />
           {stats?.gpu_percent != null && (
             <MetricCard
@@ -226,6 +236,7 @@ export default function DesktopScreen() {
               unit="%"
               color={gpuColor}
               delay={170}
+              iconName="cube-outline"
             />
           )}
         </View>
@@ -244,7 +255,7 @@ export default function DesktopScreen() {
         {media?.title && (
           <Animated.View entering={FadeInDown.duration(280).delay(220)} style={styles.mediaCard}>
             <View style={styles.mediaIconBox}>
-              <Text style={styles.mediaIcon}>🎵</Text>
+              <Ionicons name="musical-notes-outline" size={18} color={Colors.purple.light} />
             </View>
             <View style={styles.mediaInfo}>
               <Text style={styles.mediaPlayingTag}>NOW PLAYING</Text>
@@ -310,7 +321,6 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 12,
   },
-  focusIcon: { fontSize: 20 },
   focusInfo: { gap: 2, flex: 1 },
   focusLabel: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',
@@ -390,7 +400,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  mediaIcon: { fontSize: 18 },
   mediaInfo: { flex: 1, gap: 2 },
   mediaPlayingTag: {
     fontFamily: 'JetBrains Mono, Menlo, monospace',

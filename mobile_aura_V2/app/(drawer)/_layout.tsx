@@ -3,26 +3,32 @@ import { View, Text, Pressable, StyleSheet, ScrollView } from 'react-native';
 import { Drawer } from 'expo-router/drawer';
 import { useRouter, usePathname } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Colors } from '../../src/constants/colors';
 import { Theme } from '../../src/constants/theme';
 import { useAppStore } from '../../src/store/appStore';
 
-type NavItem = { label: string; icon: string; route: string; sub?: string };
+type NavItem = {
+  label: string;
+  iconName: keyof typeof Ionicons.glyphMap;
+  route: string;
+  sub?: string;
+};
 
 const SECTION_AURA: NavItem[] = [
-  { label: 'Home Matrix', icon: '⬡', route: '/', sub: 'Orb & Dashboard' },
-  { label: 'Chat Interface', icon: '◎', route: '/chat', sub: 'Neural Streaming' },
-  { label: 'Automation Hub', icon: '⚡', route: '/automation', sub: 'Phone & PC Actions' },
+  { label: 'Home Matrix', iconName: 'planet-outline', route: '/', sub: '3D Swarm Orb & Vitals' },
+  { label: 'Chat Interface', iconName: 'chatbubbles-outline', route: '/chat', sub: 'FastPath & Neural Stream' },
+  { label: 'Automation Hub', iconName: 'flash-outline', route: '/automation', sub: 'Device Tools & PC Actions' },
 ];
 
 const SECTION_TELEMETRY: NavItem[] = [
-  { label: 'PC Live Telemetry', icon: '📊', route: '/desktop', sub: 'CPU, RAM & Media' },
-  { label: 'Knowledge Vault', icon: '📋', route: '/notes', sub: 'Obsidian Notes' },
+  { label: 'PC Live Telemetry', iconName: 'stats-chart-outline', route: '/desktop', sub: 'CPU, RAM & Media' },
+  { label: 'Knowledge Vault', iconName: 'document-text-outline', route: '/notes', sub: 'Obsidian Notes' },
 ];
 
 const SECTION_SYSTEM: NavItem[] = [
-  { label: 'Core Settings', icon: '⚙', route: '/settings', sub: 'LLM & Voice Config' },
+  { label: 'Core Settings', iconName: 'hardware-chip-outline', route: '/settings', sub: 'Dual-Provider LLM & Voice' },
 ];
 
 const NAV_SECTIONS = [
@@ -49,7 +55,7 @@ function CustomDrawerContent(props: any) {
       {/* Header Profile */}
       <View style={styles.header}>
         <View style={styles.avatarContainer}>
-          <Text style={styles.avatarIcon}>🟣</Text>
+          <Ionicons name="sparkles" size={20} color={Colors.cyan.primary} />
         </View>
         <View style={styles.headerTextContainer}>
           <Text style={styles.title}>AURA V2</Text>
@@ -101,14 +107,12 @@ function CustomDrawerContent(props: any) {
                   onPress={() => navigate(item.route)}
                 >
                   {focused && <View style={styles.navRail} />}
-                  <Text
-                    style={[
-                      styles.navIcon,
-                      focused && { color: Colors.cyan.primary },
-                    ]}
-                  >
-                    {item.icon}
-                  </Text>
+                  <Ionicons
+                    name={item.iconName}
+                    size={18}
+                    color={focused ? Colors.cyan.primary : Colors.text.secondary}
+                    style={styles.navIcon}
+                  />
                   <View style={styles.navTextCol}>
                     <Text
                       style={[
@@ -183,17 +187,14 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   avatarContainer: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
+    width: 42,
+    height: 42,
+    borderRadius: 12,
     backgroundColor: 'rgba(106, 83, 153, 0.25)',
     borderWidth: 1,
     borderColor: Colors.purple.primary,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  avatarIcon: {
-    fontSize: 18,
   },
   headerTextContainer: {
     flex: 1,
@@ -277,10 +278,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.cyan.primary,
   },
   navIcon: {
-    fontSize: 16,
     width: 22,
     textAlign: 'center',
-    color: Colors.text.secondary,
   },
   navTextCol: {
     flex: 1,
