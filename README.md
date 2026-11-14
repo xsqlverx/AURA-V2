@@ -1,69 +1,114 @@
-<div align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/xsqlverx/AURA-V2/main/assets/readme/aura-hero-dark.svg">
+  <img src="https://raw.githubusercontent.com/xsqlverx/AURA-V2/main/assets/readme/aura-hero-light.svg" alt="AURA — a personal assistant for your everyday. Voice, memory, action." width="100%">
+</picture>
 
-# A U R A
+<p align="center">
+  <a href="#meet-aura">Meet Aura</a> &nbsp; / &nbsp;
+  <a href="#what-can-aura-do">What it can do</a> &nbsp; / &nbsp;
+  <a href="#under-the-hood">Under the hood</a> &nbsp; / &nbsp;
+  <a href="#get-started">Get started</a>
+</p>
 
-### Your computer, more conversational.
+# Meet Aura
 
-**A personal AI assistant that listens, remembers, and helps you get things done.**
+**AURA is a personal AI assistant built to make your computer feel a little more like yours.**
 
-Talk naturally. Control your PC. Pick up where you left off.
+Talk to it, ask it something, or give it a job. Aura brings conversation, voice, memory, and desktop tools together, so a simple request can become an action instead of another thing on your to-do list.
 
-`VOICE` &nbsp; · &nbsp; `MEMORY` &nbsp; · &nbsp; `TOOLS` &nbsp; · &nbsp; `YOUR DESKTOP`
+It's a Windows-first project that's still growing: an experiment in making an assistant useful in the small moments of everyday life.
 
-</div>
+> **The idea:** an assistant you can talk to, that remembers what matters, and can actually help you do things.
 
----
+## What can Aura do?
 
-## Meet Aura
+<table>
+<tr>
+<td width="50%" valign="top">
+<b>01 &nbsp; / &nbsp; TALK IT OUT</b>
+<br><br>
+Speak to Aura and hear a response. Its voice pipeline brings speech recognition and text-to-speech together, with local and cloud components.
+<br><br>
+<code>Voice input</code> &nbsp; <code>Spoken replies</code>
+</td>
+<td width="50%" valign="top">
+<b>02 &nbsp; / &nbsp; MAKE A MOVE</b>
+<br><br>
+Open apps and websites, control audio and media, check system information, and use other available desktop tools.
+<br><br>
+<code>PC controls</code> &nbsp; <code>Tool calling</code>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<b>03 &nbsp; / &nbsp; REMEMBER THE LITTLE THINGS</b>
+<br><br>
+Local memory files and a Chroma vector store help Aura keep useful context across conversations. Transcript saving is configurable.
+<br><br>
+<code>Personal context</code> &nbsp; <code>Local storage</code>
+</td>
+<td width="50%" valign="top">
+<b>04 &nbsp; / &nbsp; GO A LITTLE DEEPER</b>
+<br><br>
+Route requests to models for conversation, tools, or research. Aura also includes integrations for web search, Obsidian notes, and an optional Discord bot.
+<br><br>
+<code>Research</code> &nbsp; <code>Notes</code> &nbsp; <code>Discord</code>
+</td>
+</tr>
+</table>
 
-Aura is an evolving Windows-first personal assistant: part conversation partner, part voice interface, and part bridge between an AI model and the tools on your computer. It brings speech, memory, desktop actions, and a local API together in one project.
-
-Ask a question and Aura can respond conversationally. Give it a supported command and it can route that request to a tool. Speak to it through the voice pipeline, or connect through its backend. The goal is an assistant that feels present in your workflow instead of another tab you have to visit.
-
-> **The idea:** make interacting with your computer feel less like operating a machine and more like working with an assistant.
-
-## What Aura can do
-
-🎙️ **Listen and speak** — A voice pipeline connects speech recognition, conversation, and speech synthesis. It supports local and cloud voice components, with configurable providers and voices.
-
-🧠 **Remember context** — Local memory files and a Chroma vector store help bring relevant information back into conversations. Transcript saving can be configured.
-
-⚡ **Handle everyday commands** — Fast paths and tool routing connect requests to supported actions, including opening websites, media controls, volume, and system information.
-
-🔎 **Research and reason** — Different model providers serve conversation, tool execution, and deeper research. Availability depends on your configured API keys.
-
-🖥️ **Connect to your desktop** — A FastAPI backend exposes the assistant to compatible clients. A separate desktop UI can connect to it; it is not included in this repository.
-
-💬 **Meet you on Discord** — An optional bot can connect Aura to Discord when configured and its dependencies are available.
-
-Aura is an active personal project. Features and integrations are evolving, and some depend on Windows, external services, models, or separately installed components.
-
-## How it fits together
+### A few ways to start
 
 ```text
-  Your voice / a compatible client / Discord
-                    │
-                    ▼
-             ┌─────────────┐
-             │    AURA     │
-             │  FastAPI +  │
-             │   routing   │
-             └──────┬──────┘
-                    │
-       ┌────────────┼────────────┐
-       ▼            ▼            ▼
-   Voice I/O     AI models    PC tools
-       │            │            │
-       └────────────┼────────────┘
-                    ▼
-              Local memory
+“Open YouTube”                  →  open a website
+“Set the volume to 40%”         →  adjust your PC audio
+“Remember I like short answers” →  save a preference
+“Find my notes about calculus”  →  search your Obsidian vault
 ```
 
-Simple requests can take a fast path; others are routed through the assistant and its available tools. Voice and memory run alongside the backend, while configured cloud providers supply model capabilities.
+What happens depends on your setup, connected services, and how Aura interprets the request.
+
+## Under the hood
+
+**Not every request needs the scenic route.**
+
+For familiar commands, Aura can match a direct fast path and run a tool without waiting for a model. Requests that need more interpretation can be routed through an AI model and the relevant tools.
+
+```text
+ you ask
+    │
+    ▼
+ AURA ──── familiar command ────► direct tool
+    │
+    └───── needs more context ───► model + tools
+                                     │
+                          memory / voice / response
+```
+
+The backend is built with **Python** and **FastAPI**. Voice components, tools, memory, and optional integrations run around it. The desktop UI is a separate project; this repository contains the assistant backend.
+
+<details>
+<summary><b>Take a closer look at the moving parts</b></summary>
+<br>
+
+| Part | Where to explore |
+|:--|:--|
+| Conversation, routing, fast paths, API | [`core/`](core/) |
+| Speech recognition, audio, and text-to-speech | [`voice/`](voice/) |
+| Desktop actions and tool definitions | [`tools/`](tools/) |
+| Local and semantic memory | [`memory/`](memory/) |
+| Discord integration | [`comms/`](comms/) |
+| Tests and design notes | [`tests/`](tests/) · [`docs/`](docs/) |
+
+Curious about the direct command path? [Explore the fast-path design →](docs/FASTPATH_OPTIMIZATION.md)
+
+</details>
 
 ## Get started
 
-**You’ll need:** Windows, Python, a microphone and speakers for voice, and API keys for the services you want to use. Some voice models and dependencies may need additional downloads or system setup.
+Aura is a personal project in active development, so expect some setup and experimentation. You'll need **Windows**, **Python**, and API keys for the services you want to use. A microphone and speakers are needed for voice; some components may require extra packages, models, or system setup.
+
+**01 / Get the code**
 
 ```powershell
 git clone https://github.com/xsqlverx/AURA-V2.git
@@ -74,37 +119,36 @@ pip install -r requirements.txt
 Copy-Item .env.example .env.local
 ```
 
-Open `.env.local` and add the relevant keys. The current configuration uses **OpenRouter** for conversation, **Groq** for tool execution, and **NVIDIA** for deep research; other integrations have their own settings. See [`.env.example`](.env.example) and [`core/config.py`](core/config.py) for options and defaults. Keep your keys private.
+**02 / Make it yours**
+
+Open `.env.local` and add the keys for the features you want. The current configuration uses **OpenRouter** for conversation, **Groq** for tool execution, and **NVIDIA** for deep research. Voice and other integrations have their own settings.
+
+See [`.env.example`](.env.example) and [`core/config.py`](core/config.py) for the available options. Keep your keys private.
+
+**03 / Start Aura**
 
 ```powershell
 python main.py
 ```
 
-The backend starts on port **8000** by default. `main.py` also attempts to start the voice pipeline and, if configured, the Discord bot. Optional components can be unavailable without preventing every other component from running. The desktop UI is a separate project; the startup message’s port 3000 refers to that client, not a UI served by this repository.
+The backend listens on port **8000** by default. Startup also attempts to launch the voice pipeline and, when configured, the Discord bot. The separately maintained desktop UI is not served by this repository; the startup message's port 3000 refers to that client.
 
-## Explore the project
+<details>
+<summary><b>A note on privacy and network access</b></summary>
+<br>
 
-| Path | What’s inside |
-|:--|:--|
-| [`main.py`](main.py) | Starts the backend and optional voice and Discord workers |
-| [`core/`](core/) | Assistant, routing, fast paths, configuration, and API |
-| [`voice/`](voice/) | Speech recognition, audio handling, and text-to-speech |
-| [`tools/`](tools/) | Desktop actions and tool registry |
-| [`memory/`](memory/) | Local and semantic memory |
-| [`comms/`](comms/) | Communication integrations |
-| [`tests/`](tests/) | Automated checks for assistant components |
-| [`docs/`](docs/) | Design notes, implementation details, and project history |
+Aura stores runtime data locally under `data/` by default, and transcript saving can be configured. It is **not fully offline**: configured AI, speech, and other services may send data to external providers. Review the provider settings and code before sharing sensitive information.
 
-## A note on privacy and access
+The backend binds to `0.0.0.0` by default. Review its authentication and network configuration before making it reachable by other devices.
 
-Aura stores runtime data locally under `data/` by default, but **local storage does not mean fully offline**: configured model, speech, and other integrations can send data to external providers. Review your provider settings and the code before using sensitive information. The backend binds to `0.0.0.0` by default; review its authentication and network configuration before making it reachable by other devices.
+</details>
 
 ---
 
-<div align="center">
-
-**Built to be useful. Designed to feel personal. Always evolving.**
-
-*This repository contains the desktop assistant backend. Mobile app versions are maintained separately.*
-
-</div>
+<p align="center">
+  <b>Made to be useful. Still becoming.</b>
+  <br><br>
+  <a href="https://github.com/xsqlverx">More things I'm building ↗</a>
+  <br><br>
+  <sub>Mobile app versions are not included in this repository.</sub>
+</p>

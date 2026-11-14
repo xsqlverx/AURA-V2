@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="410" viewBox="0 0 1200 410" role="img" aria-labelledby="title desc">
+  <title id="title">AURA — a personal assistant for your everyday</title>
+  <desc id="desc">A lavender soundwave orbits a glowing violet sphere beside the AURA wordmark.</desc>
+  <defs>
+    <radialGradient id="glow"><stop stop-color="#a58cff" stop-opacity=".25"/><stop offset="1" stop-color="#a58cff" stop-opacity="0"/></radialGradient>
+    <radialGradient id="core" cx="35%" cy="27%"><stop stop-color="#efeaff"/><stop offset=".3" stop-color="#b6a2ff"/><stop offset=".7" stop-color="#745dc7"/><stop offset="1" stop-color="#30264f"/></radialGradient>
+    <linearGradient id="line" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#cbbfff"/><stop offset="1" stop-color="#7060ba" stop-opacity=".35"/></linearGradient>
+    <style>
+      .pulse { animation: breathe 5s ease-in-out infinite; transform-origin: 920px 195px; }
+      .spark { animation: twinkle 4s ease-in-out infinite; }
+      @keyframes breathe { 0%, 100% { opacity: .72; transform: scale(.97); } 50% { opacity: 1; transform: scale(1.03); } }
+      @keyframes twinkle { 0%, 100% { opacity: .4; } 50% { opacity: 1; } }
+      @media (prefers-reduced-motion: reduce) { .pulse, .spark { animation: none; } }
+    </style>
+  </defs>
+  <rect width="1200" height="410" rx="20" fill="#0d1018"/>
+  <rect x="1" y="1" width="1198" height="408" rx="19" fill="none" stroke="#292b3c"/>
+  <circle cx="920" cy="195" r="202" fill="url(#glow)" class="pulse"/>
+  <g fill="none" stroke="url(#line)">
+    <circle cx="920" cy="195" r="110" opacity=".15"/>
+    <circle cx="920" cy="195" r="146" opacity=".18"/>
+    <ellipse cx="920" cy="195" rx="189" ry="72" transform="rotate(-24 920 195)" opacity=".42"/>
+    <ellipse cx="920" cy="195" rx="189" ry="72" transform="rotate(24 920 195)" opacity=".35"/>
+    <ellipse cx="920" cy="195" rx="169" ry="48" opacity=".55"/>
+  </g>
+  <circle cx="920" cy="195" r="57" fill="url(#core)" class="pulse"/>
+  <circle cx="920" cy="195" r="65" fill="none" stroke="#d8ceff" stroke-opacity=".32"/>
+  <path d="M795 195v-9m12 21v-24m12 32v-40m12 48v-56m12 41v-25m12 19v-14m12 31v-49m12 60v-71m12 78v-85m12 65v-45m12 34v-23m12 34v-43m12 60v-77m12 73v-69m12 52v-35m12 27v-18m12 22v-26m12 37v-49m12 53v-57m12 44v-32m12 20v-11" fill="none" stroke="#eee8ff" stroke-opacity=".8" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="770" cy="148" r="3" fill="#d5c9ff" class="spark"/>
+  <circle cx="1064" cy="250" r="3" fill="#d5c9ff" class="spark"/>
+  <circle cx="1055" cy="100" r="2" fill="#d5c9ff" opacity=".6"/>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="60" y="66" fill="#c2aeff" font-size="14" font-weight="700" letter-spacing="3">PERSONAL ASSISTANT / 02</text>
+    <text x="54" y="194" fill="#f5f2eb" font-size="112" font-weight="700" letter-spacing="-5">AURA</text>
+    <text x="60" y="238" fill="#c4c6d3" font-size="23">A little less clicking. A little more doing.</text>
+    <path d="M60 326H1140" stroke="#303344"/>
+    <text x="60" y="365" fill="#a7adbf" font-size="13" font-weight="700" letter-spacing="2.4">VOICE  /  MEMORY  /  ACTION</text>
+    <text x="1140" y="365" text-anchor="end" fill="#c2aeff" font-size="13" font-weight="700" letter-spacing="2">BUILT TO BE PERSONAL  ↗</text>
+  </g>
+</svg>
