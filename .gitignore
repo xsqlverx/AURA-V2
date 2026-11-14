@@ -191,6 +191,7 @@ nul
 
 # Temp / scratch
 temphermes-agent/
+/.local/
 
 # Runtime data
 data/
