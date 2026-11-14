@@ -214,3 +214,28 @@ build/
 /Aura-mobile-V3/
 /Aura-mobile-V4/
 /mobile_aura_V2/
+
+# Local handoffs, old planning notes, and generated session documentation
+/AGENTS.md
+/AI_STUDIO_PROMPT.md
+/FASTPATH_IMPLEMENTATION_COMPLETE.md
+/HANDOFF_TO_NATIVE.md
+/NEW_SESSION_PROMPT.md
+/session.md
+/docs/AGENTS_LEGACY.md
+/docs/AI RESPONSES.md
+/docs/AURA_AUDIT_AND_14_DAY_PLAN.md
+/docs/AURA_x_Hermes_Collab.md
+/docs/BEFORE_AFTER_YOUR_COMMAND.md
+/docs/Claude chat.md
+/docs/EXPO_GUIDE.md
+/docs/FASTPATH_LOGGING_GUIDE.md
+/docs/FASTPATH_QUICKSTART.md
+/docs/FASTPATH_VISUAL_REFERENCE.md
+/docs/HANDSFREE_ANTIGRAVITY_IMPLEMENTATION.md
+/docs/IMPLEMENTATION.md
+/docs/PERSONAL_VOICE_REVIEW.md
+/docs/PROJECT_STATUS.md
+/docs/TERMINAL_OUTPUT_REFERENCE.md
+/docs/WHY_IT_ROUTED_TO_LLM_EXPLAINED.md
+/docs/audit/VALIDATION_RESULTS.md
