@@ -25,9 +25,10 @@ if not OPENROUTER_API_KEY:
     logger.warning("OPENROUTER_API_KEY not set — conversation unavailable")
 
 # ── LLM Models ───────────────────────────────────────────────────────────────
-MODEL_DEEP    = "nvidia/nemotron-3-super-120b-a12b"    # Nvidia NIM deep research
-MODEL_FAST    = "meta-llama/llama-3.1-8b-instruct"     # OpenRouter conversation
-MODEL_TOOLS   = "openai/gpt-oss-120b"                  # Groq tool execution
+MODEL_DEEP           = os.getenv("MODEL_DEEP", "nvidia/nemotron-3-super-120b-a12b")    # Nvidia NIM deep research
+MODEL_FAST           = os.getenv("MODEL_FAST", "meta-llama/llama-3.3-70b-instruct")    # OpenRouter conversation; grounded personal voice
+MODEL_TOOLS          = os.getenv("MODEL_TOOLS", "qwen/qwen3.8-27b")                   # Groq tool execution (ultra-fast, 0.75s)
+MODEL_TOOLS_FALLBACK = os.getenv("MODEL_TOOLS_FALLBACK", "meta-llama/llama-3.3-70b-instruct") # OpenRouter fallback for tools
 
 # ── Server ───────────────────────────────────────────────────────────────────
 SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")

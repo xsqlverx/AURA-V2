@@ -127,6 +127,7 @@ def _resolve_exe(name: str) -> str | None:
 def launch_app(app_name: str) -> dict:
     key = app_name.lower().strip()
     exe = APP_MAP.get(key, app_name)
+    resolved = None
     try:
         if exe.endswith(":") or exe.startswith("http"):
             os.startfile(exe)
@@ -136,8 +137,9 @@ def launch_app(app_name: str) -> dict:
                 subprocess.Popen([resolved], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             else:
                 subprocess.Popen([exe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        logger.info("Launched: %s", resolved or exe)
-        return {"success": True, "launched": resolved or exe}
+        launched_target = resolved or exe
+        logger.info("Launched: %s", launched_target)
+        return {"success": True, "launched": launched_target}
     except Exception as e:
         logger.error("launch_app failed: %s", e)
         return {"error": str(e)}
@@ -216,6 +218,55 @@ def kill_process(pid: int) -> dict:
         return {"error": "Process not found"}
     except Exception as e:
         return {"error": str(e)}
+
+
+def close_app(app_name: str) -> dict:
+    """Close or terminate an application or browser tab by name."""
+    if not app_name or not app_name.strip():
+        return {"error": "No application name provided"}
+
+    target = app_name.strip().lower()
+
+    # 1. Handle tab / website closing (e.g. "youtube", "tab", "webpage")
+    if target in ("youtube", "tab", "current tab", "the tab", "webpage", "site"):
+        try:
+            import pyautogui
+            pyautogui.hotkey("ctrl", "w")
+            logger.info("Closed tab via Ctrl+W for: %s", app_name)
+            return {"success": True, "closed": app_name, "action": "closed_tab"}
+        except Exception as e:
+            return {"error": str(e)}
+
+    # 2. Map friendly name to executable stem
+    exe_target = APP_MAP.get(target, target)
+    stem = exe_target.replace(".exe", "").lower()
+
+    # 3. Look for matching running processes
+    terminated = []
+    for p in psutil.process_iter(["pid", "name"]):
+        try:
+            p_name = p.info["name"].lower()
+            if p_name in SYSTEM_PROC_NAMES:
+                continue
+            if stem == p_name or (stem + ".exe") == p_name or stem in p_name:
+                p.terminate()
+                terminated.append(p.info["name"])
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+    if terminated:
+        logger.info("Terminated processes for %s: %s", app_name, terminated)
+        return {"success": True, "closed": app_name, "count": len(terminated)}
+
+    # 4. Fallback: try closing the active window via Ctrl+W
+    try:
+        import pyautogui
+        pyautogui.hotkey("ctrl", "w")
+        return {"success": True, "closed": app_name, "action": "fallback_closed"}
+    except Exception:
+        pass
+
+    return {"error": f"No running application found for '{app_name}'"}
 
 
 # ── File Management ───────────────────────────────────────────────────────────
@@ -498,15 +549,43 @@ def clipboard_paste() -> dict:
         return {"error": str(e)}
 
 
-# ── Input Control ─────────────────────────────────────────────────────────────
-
 def type_text(text: str) -> dict:
+    """Type text into the currently active window with full Unicode and punctuation fidelity."""
     try:
+        import pyperclip
         import pyautogui
-        pyautogui.write(text, interval=0.03)
-        return {"success": True}
+        # Fast, exact Unicode paste preserving all punctuation and casing
+        pyperclip.copy(text)
+        time.sleep(0.05)
+        pyautogui.hotkey("ctrl", "v")
+        time.sleep(0.05)
+        logger.info("Direct typed %d characters: %r", len(text), text[:30])
+        return {"success": True, "typed": text}
     except Exception as e:
-        return {"error": str(e)}
+        try:
+            import pyautogui
+            pyautogui.write(text, interval=0.01)
+            return {"success": True, "typed": text}
+        except Exception as e2:
+            logger.error("type_text failed: %s", e2)
+            return {"error": str(e2)}
+
+
+def launch_and_type(app_name: str, text: str) -> dict:
+    """Launch an application, wait for focus, and type the exact payload."""
+    launch_res = launch_app(app_name)
+    if launch_res.get("error"):
+        return launch_res
+
+    # Give window time to initialize and gain focus
+    time.sleep(0.7)
+    type_res = type_text(text)
+    return {
+        "success": type_res.get("success", False),
+        "app": app_name,
+        "typed": text,
+        "error": type_res.get("error"),
+    }
 
 def press_key(key: str) -> dict:
     try:
@@ -550,10 +629,12 @@ def _next_id(tasks: list[dict]) -> str:
             pass
     return str(mx + 1)
 
-def create_task(name: str, date: str, time: str = "", category: str = "General") -> dict:
+def create_task(name: str, date: str = "", time: str = "", category: str = "General") -> dict:
     try:
-        if not name or not date:
-            return {"error": "name and date are required"}
+        if not name:
+            return {"error": "name is required"}
+        if not date:
+            date = datetime.now().strftime("%Y-%m-%d")
         tasks = _load_tasks()
         task = {
             "id": _next_id(tasks),

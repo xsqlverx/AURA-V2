@@ -34,10 +34,27 @@ def _on_mute():
 
 def _on_flow_toggle():
     try:
-        from voice.pipeline import toggle_flow_mode
-        toggle_flow_mode(tts=_tts)
+        from core import handsfree
+        new_state = handsfree.controller.toggle(source="hotkey")
+        if _tts:
+            if new_state:
+                _tts.speak("Hands-free mode active. I'm listening.")
+            else:
+                _tts.speak("Hands-free mode deactivated.")
     except Exception as e:
-        logger.error("Error in flow mode hotkey handler: %s", e)
+        logger.error("Error in hands-free hotkey handler: %s", e)
+
+
+def _on_emergency_handsfree_off():
+    try:
+        from core import handsfree
+        handsfree.controller.disable(reason="emergency_hotkey")
+        if _tts:
+            _tts.stop_playback()
+            _tts.speak("Hands-free mode emergency stopped.")
+        logger.info("Emergency hands-free disable triggered via Ctrl+Alt+Esc.")
+    except Exception as e:
+        logger.error("Error in emergency handsfree hotkey handler: %s", e)
 
 
 def _run_listener():
@@ -47,6 +64,7 @@ def _run_listener():
         hotkeys = keyboard.GlobalHotKeys({
             "<alt>+m": _on_mute,
             "<ctrl>+<alt>+s": _on_flow_toggle,
+            "<ctrl>+<alt>+<esc>": _on_emergency_handsfree_off,
         })
         hotkeys.start()
     except Exception as e:

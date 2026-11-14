@@ -208,3 +208,8 @@ build/
 # IDE / tools
 .opencode/
 
+
+# Mobile apps live in separate local repositories / archives
+/Aura-mobile-V3/
+/Aura-mobile-V4/
+/mobile_aura_V2/

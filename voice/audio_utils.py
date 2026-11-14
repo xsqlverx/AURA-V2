@@ -4,7 +4,7 @@ import numpy as np
 
 
 def generate_amplitude_payload(audio_chunk: np.ndarray) -> str:
-    """Compute 4-band RMS amplitude from a float32 audio chunk and return an AMPLITUDE: string.
+    """Compute RMS in four consecutive time windows (not frequency bands).
 
     Args:
         audio_chunk: 1-D float32 numpy array of audio samples (range -1.0 to 1.0).
@@ -16,7 +16,8 @@ def generate_amplitude_payload(audio_chunk: np.ndarray) -> str:
     if audio_chunk.size == 0:
         return "AMPLITUDE:0.0,0.0,0.0,0.0"
 
-    sub_chunks = np.array_split(audio_chunk, 4)
+    audio_chunk = np.nan_to_num(audio_chunk.ravel().astype(np.float64), nan=0.0, posinf=0.0, neginf=0.0)
+    sub_chunks = np.array_split(np.clip(audio_chunk, -1.0, 1.0), 4)
     amplitudes = []
 
     for chunk in sub_chunks:

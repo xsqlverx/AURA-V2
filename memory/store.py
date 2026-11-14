@@ -24,8 +24,9 @@ def init_store() -> "MemoryStore":
 
 
 def get_store() -> "MemoryStore":
+    global _store
     if _store is None:
-        raise RuntimeError("MemoryStore not initialized. Call init_store() first.")
+        return init_store()
     return _store
 
 

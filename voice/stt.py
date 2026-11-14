@@ -7,6 +7,7 @@ import threading
 
 import numpy as np
 import sounddevice as sd
+from voice.audio_meter import get_audio_meter
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,7 @@ def record_speech(stop_event: threading.Event = None, ptt_event: threading.Event
     Returns path to a temp wav file, or None if nothing was captured.
     """
     ptt_mode = ptt_event is not None
+    audio_meter = get_audio_meter()
     frames = []
     silent_chunks = 0
     speech_started = False
@@ -94,7 +96,24 @@ def record_speech(stop_event: threading.Event = None, ptt_event: threading.Event
     max_chunks = int(15 * chunks_per_sec)
     drain_chunks = int(0.4 * SAMPLE_RATE / CHUNK_SIZE)
 
-    with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16", blocksize=CHUNK_SIZE) as stream:
+    active_dev = None
+    try:
+        from voice import audio_device
+        active_dev = audio_device.get_selected_device_id()
+    except Exception:
+        pass
+
+    try:
+        stream = sd.InputStream(device=active_dev, samplerate=SAMPLE_RATE, channels=1, dtype="int16", blocksize=CHUNK_SIZE)
+    except Exception as err:
+        logger.warning("Failed to open STT stream with device %s: %s. Falling back to default...", active_dev, err)
+        try:
+            stream = sd.InputStream(device=None, samplerate=SAMPLE_RATE, channels=1, dtype="int16", blocksize=CHUNK_SIZE)
+        except Exception as def_err:
+            logger.error("Failed to open default STT stream: %s", def_err)
+            return ""
+
+    with stream:
         # Drain stale mic buffer
         for _ in range(drain_chunks):
             stream.read(CHUNK_SIZE)
@@ -105,6 +124,7 @@ def record_speech(stop_event: threading.Event = None, ptt_event: threading.Event
 
             chunk, _ = stream.read(CHUNK_SIZE)
             amplitude = np.abs(chunk).max()
+            audio_meter.submit("mic", chunk)
             frames.append(chunk.copy())
 
             if amplitude > SPEECH_THRESH:

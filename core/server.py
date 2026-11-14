@@ -48,6 +48,11 @@ class _WSManager:
         async with self._lock:
             self._clients.append(ws)
         logger.info("WS client connected. Total: %d", len(self._clients))
+        try:
+            from core import handsfree
+            await ws.send_text(f"HANDSFREE:{json.dumps(handsfree.controller.snapshot())}")
+        except Exception:
+            pass
 
     async def disconnect(self, ws: WebSocket) -> None:
         async with self._lock:
@@ -108,13 +113,30 @@ def _start_socket_bridge() -> None:
 # ── TTS response helper ───────────────────────────────────────────────────────
 # Feeds UI chat/briefing responses to the TTS engine so Aura speaks them aloud.
 
+def _get_or_init_tts():
+    """Get registered TTS engine, or lazily initialize one if not yet active."""
+    from comms.state import get_tts, set_tts
+    tts = get_tts()
+    if tts is not None:
+        return tts
+    try:
+        from voice.tts import create_engine
+        from core.config import TTS_PROVIDER, TTS_VOICE
+        tts = create_engine(provider=TTS_PROVIDER, voice=TTS_VOICE)
+        set_tts(tts)
+        logger.info("Initialized backend TTS engine: provider=%s, voice=%s", TTS_PROVIDER, TTS_VOICE)
+        return tts
+    except Exception as e:
+        logger.warning("Failed to initialize backend TTS engine: %s", e)
+        return None
+
+
 def _feed_tts(text: str) -> None:
     """Feed a text sentence to TTS queue (non-blocking) and broadcast speaking state."""
     if not text.strip():
         return
     try:
-        from comms.state import get_tts
-        tts = get_tts()
+        tts = _get_or_init_tts()
         if tts is None:
             return
         ws_manager.broadcast_sync("STATE:speaking")
@@ -126,8 +148,7 @@ def _feed_tts(text: str) -> None:
 def _finish_tts() -> None:
     """After all chunks have been fed, wait for TTS to complete, then broadcast idle."""
     try:
-        from comms.state import get_tts
-        tts = get_tts()
+        tts = _get_or_init_tts()
         if tts is not None:
             threading.Thread(target=_wait_tts_idle, args=(tts,), daemon=True).start()
     except Exception:
@@ -189,6 +210,12 @@ async def lifespan(app: FastAPI):
     jobs.set_broadcaster(ws_manager.broadcast_sync)
     pending.set_broadcaster(ws_manager.broadcast_sync)
 
+    # Wire hands-free controller state transitions to the WS broadcaster
+    from core import handsfree
+    def _broadcast_handsfree(snap: dict):
+        ws_manager.broadcast_sync(f"HANDSFREE:{json.dumps(snap)}")
+    handsfree.controller.register_listener(_broadcast_handsfree)
+
     # Pre-load Whisper in background so health endpoint is available immediately
     def _background_whisper_load():
         try:
@@ -199,6 +226,19 @@ async def lifespan(app: FastAPI):
             logger.warning("Whisper pre-load failed: %s", e)
 
     threading.Thread(target=_background_whisper_load, daemon=True).start()
+
+    # Initialize audio input device from saved preferences
+    try:
+        from voice import audio_device
+        audio_device.init_audio_device()
+    except Exception as e:
+        logger.warning("Audio device init failed: %s", e)
+
+    # Initialize TTS engine in backend so chat responses always speak
+    try:
+        _get_or_init_tts()
+    except Exception as e:
+        logger.warning("Backend TTS startup init failed: %s", e)
 
     yield
     logger.info("Aura backend shutting down.")
@@ -234,7 +274,7 @@ async def mobile_auth_middleware(request: Request, call_next):
         return await call_next(request)
     # Internal requests (voice pipeline, Discord bot) use localhost/127.0.0.1 as Host
     host = request.headers.get("host", "").split(":")[0]
-    if host in ("127.0.0.1", "localhost"):
+    if host in ("127.0.0.1", "localhost") and request.client and request.client.host in ("127.0.0.1", "::1"):
         return await call_next(request)
     auth = request.headers.get("Authorization", "")
     if auth == f"Bearer {MOBILE_API_KEY}":
@@ -355,6 +395,10 @@ class DictationRequest(BaseModel):
     ptt: bool = False
     clean: bool = True
 
+class AudioDeviceSelectRequest(BaseModel):
+    device_id: Optional[int] = None
+    device_name: Optional[str] = None
+
 class LookRequest(BaseModel):
     region: Optional[int] = None
 
@@ -375,6 +419,13 @@ class MacroNameRequest(BaseModel):
 
 class MacroStartRequest(BaseModel):
     countdown: int = 5
+
+class HandsFreeSetRequest(BaseModel):
+    enabled: bool
+    request_id: Optional[str] = None
+
+class HandsFreeCancelRequest(BaseModel):
+    command_id: Optional[str] = None
 
 _FRIENDS_PATH = Path(__file__).parent.parent / "data" / "friends.json"
 
@@ -415,16 +466,40 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/handsfree/state")
+async def get_handsfree_state():
+    from core import handsfree
+    return handsfree.controller.snapshot()
+
+
+@app.post("/handsfree/set")
+async def set_handsfree_state(req: HandsFreeSetRequest):
+    from core import handsfree
+    if req.enabled:
+        handsfree.controller.enable(source="api", request_id=req.request_id)
+    else:
+        handsfree.controller.disable(reason="api_request", request_id=req.request_id)
+    return handsfree.controller.snapshot()
+
+
+@app.post("/handsfree/cancel")
+async def cancel_handsfree(req: Optional[HandsFreeCancelRequest] = None):
+    from core import handsfree
+    cmd_id = req.command_id if req else None
+    handsfree.controller.cancel_current(command_id=cmd_id, reason="api_cancel")
+    return handsfree.controller.snapshot()
+
+
 @app.get("/flow_mode")
 async def get_flow_mode():
-    from voice.pipeline import flow_mode
-    return {"flow_mode": flow_mode.is_set()}
+    from core import handsfree
+    return {"flow_mode": handsfree.controller.enabled}
 
 
 @app.post("/flow_mode/toggle")
 async def toggle_flow_mode():
-    from voice.pipeline import toggle_flow_mode as _toggle
-    state = _toggle()
+    from core import handsfree
+    state = handsfree.controller.toggle(source="api_flow_toggle")
     return {"flow_mode": state}
 
 
@@ -1000,8 +1075,7 @@ async def discord_polish(req: DiscordPolishRequest):
 @app.get("/voice/options")
 async def voice_options():
     """List available TTS voices and report the currently active one."""
-    from comms.state import get_tts
-    tts = get_tts()
+    tts = _get_or_init_tts()
     if tts is None:
         return {"voices": [], "current": None}
     return {
@@ -1014,8 +1088,7 @@ async def voice_options():
 async def voice_select(req: VoiceSelectRequest):
     """Switch the active TTS voice at runtime. Broadcasts VOICE_CHANGED
     over the 9001 socket so all UI clients update in sync."""
-    from comms.state import get_tts
-    tts = get_tts()
+    tts = _get_or_init_tts()
     if tts is None:
         raise HTTPException(status_code=503, detail="TTS not initialized")
     if tts.set_voice(req.voice):
@@ -1037,6 +1110,54 @@ async def speak(req: SpeakRequest):
     """
     _speak_response(req.text)
     return {"ok": True}
+
+
+# ── Audio Input (Microphone) ──────────────────────────────────────────────────
+
+@app.get("/audio/devices")
+async def audio_devices():
+    """List available audio input devices (microphones) and current selection."""
+    from voice import audio_device
+    devices = audio_device.list_input_devices()
+    current_id = audio_device.get_selected_device_id()
+    current_name = audio_device.get_selected_device_name()
+    default_id = audio_device.get_default_input_device_id()
+    return {
+        "devices": devices,
+        "current_device": current_id,
+        "current_device_name": current_name,
+        "default_device": default_id,
+    }
+
+
+@app.post("/audio/device/select")
+async def audio_device_select(req: AudioDeviceSelectRequest):
+    """Select the active input microphone for Aura.
+    
+    Pass device_id=null or -1 to revert to system default.
+    Broadcasts AUDIO_DEVICE_CHANGED over WebSocket to all UI clients.
+    """
+    from voice import audio_device
+    try:
+        res = audio_device.set_selected_device(req.device_id, req.device_name)
+        payload = json.dumps({
+            "current_device": res["current_device"],
+            "current_device_name": res["current_device_name"],
+        })
+        ws_manager.broadcast_sync(f"AUDIO_DEVICE_CHANGED:{payload}")
+        return res
+    except Exception as e:
+        logger.error("Failed to select audio device: %s", e)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/audio/device/test")
+async def audio_device_test():
+    """Test audio capture on the currently selected microphone for 1.5 seconds."""
+    from voice import audio_device
+    loop = asyncio.get_running_loop()
+    res = await loop.run_in_executor(None, lambda: audio_device.test_microphone(1.5))
+    return res
 
 
 # ── System Stats ───────────────────────────────────────────────────────────────

@@ -15,7 +15,8 @@ faster-whisper
 pvporcupine
 pvrecorder
 supertonic
-edge-tts
+# 7.3.1+ supports Microsoft's required Sec-MS-GEC v2 tokens (older versions return 403).
+edge-tts>=7.3.1
 miniaudio
 # Pinned for compatibility and stability
 chromadb==0.4.24

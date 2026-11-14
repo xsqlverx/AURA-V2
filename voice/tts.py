@@ -12,9 +12,51 @@ import numpy as np
 import sounddevice as sd
 
 from voice import emotion
-from voice.audio_utils import generate_amplitude_payload
+from voice.audio_meter import get_audio_meter
 
 logger = logging.getLogger(__name__)
+
+# ── Spoken history tracking for acoustic echo suppression ─────────────────────
+_spoken_history: list[tuple[str, float]] = []
+_spoken_lock = threading.Lock()
+
+
+def record_spoken_text(text: str):
+    if not text:
+        return
+    clean = text.strip()
+    with _spoken_lock:
+        _spoken_history.append((clean, time.time()))
+        if len(_spoken_history) > 25:
+            _spoken_history.pop(0)
+
+
+def is_recent_tts_echo(text: str, max_age_seconds: float = 12.0) -> bool:
+    """Check if recognized text is an acoustic echo of Aura's recent voice output."""
+    if not text:
+        return False
+    now = time.time()
+    import re
+    t_clean = re.sub(r'[^\w\s]', '', text.lower()).strip()
+    t_words = set(t_clean.split())
+    if not t_words:
+        return False
+
+    with _spoken_lock:
+        for phrase, timestamp in reversed(_spoken_history):
+            if now - timestamp > max_age_seconds:
+                break
+            p_clean = re.sub(r'[^\w\s]', '', phrase.lower()).strip()
+            p_words = set(p_clean.split())
+
+            # Full substring match
+            if t_clean in p_clean or p_clean in t_clean:
+                return True
+            # Word overlap match
+            overlap = len(t_words & p_words)
+            if overlap >= 2 and (overlap / len(t_words) >= 0.5):
+                return True
+    return False
 
 
 class BaseTTSEngine:
@@ -22,6 +64,7 @@ class BaseTTSEngine:
 
     def __init__(self, voice: str):
         self._voice = voice
+        self._audio_meter = get_audio_meter()
         self._sample_rate = 44100
         self._voice_lock = threading.Lock()
         self._text_queue: queue.Queue = queue.Queue()
@@ -29,6 +72,7 @@ class BaseTTSEngine:
         self._stop = threading.Event()
         self._paused = threading.Event()
         self.is_speaking = threading.Event()
+        self._is_generating = threading.Event()
 
         self._audio_buffer = np.array([], dtype=np.float32)
         self._buffer_lock = threading.Lock()
@@ -51,11 +95,35 @@ class BaseTTSEngine:
             blocksize=1024,
         )
 
-    def _ensure_stream(self, start: bool = True) -> bool:
-        """(Re)create the output stream if missing/closed. Returns True if usable."""
+    def _is_stream_alive(self) -> bool:
+        stream = getattr(self, "_stream", None)
+        if stream is None:
+            return False
         try:
-            if self._stream is None:
-                self._stream = self._create_stream()
+            return bool(stream.active)
+        except Exception:
+            return False
+
+    def _ensure_stream(self, start: bool = True) -> bool:
+        """(Re)create the output stream if missing, closed, or invalid. Returns True if usable."""
+        try:
+            if self._stream is not None:
+                try:
+                    if self._stream.active:
+                        self._audio_available = True
+                        return True
+                    if start:
+                        self._stream.start()
+                        self._audio_available = True
+                        return True
+                except Exception:
+                    try:
+                        self._stream.close(ignore_errors=True)
+                    except Exception:
+                        pass
+                    self._stream = None
+
+            self._stream = self._create_stream()
             if start and not self._stream.active:
                 self._stream.start()
             self._audio_available = True
@@ -84,11 +152,8 @@ class BaseTTSEngine:
 
     def _safe_start(self) -> bool:
         try:
-            if self._stream is None:
+            if not self._is_stream_alive():
                 return self._ensure_stream(start=True)
-            if not self._stream.active:
-                self._stream.start()
-            self._audio_available = True
             return True
         except Exception as e:
             logger.warning("Audio stream start failed (no output driver?): %s", e)
@@ -117,6 +182,7 @@ class BaseTTSEngine:
             if not text:
                 self._text_queue.task_done()
                 continue
+            self._is_generating.set()
             try:
                 wav, _duration = self._synthesize_now(text)
                 if wav is not None and wav.size > 0:
@@ -125,6 +191,7 @@ class BaseTTSEngine:
             except Exception as e:
                 logger.error("TTS generation error: %s", e)
             finally:
+                self._is_generating.clear()
                 self._text_queue.task_done()
 
     def _audio_callback(self, outdata, frames, time_info, status):
@@ -155,9 +222,15 @@ class BaseTTSEngine:
                 self.is_speaking.clear()
         except Exception:
             outdata[:, 0] = 0.0
+        finally:
+            # Actual played samples, including the silence tail, go to a bounded mailbox.
+            self._audio_meter.submit("tts", outdata[:, 0])
 
     def speak(self, text: str):
         if text and text.strip():
+            record_spoken_text(text)
+            if not self._is_stream_alive():
+                self._ensure_stream(start=True)
             self._text_queue.put(text)
             if not self._audio_available:
                 # Device may have returned — retry once in background.
@@ -181,6 +254,7 @@ class BaseTTSEngine:
             except queue.Empty:
                 break
         self.is_speaking.clear()
+        self._is_generating.clear()
         self._safe_start()
 
     def pause(self):
@@ -194,20 +268,26 @@ class BaseTTSEngine:
     def wait_until_done(self, timeout: float = 120.0):
         import time as _time
         deadline = _time.time() + timeout
-        while not self._text_queue.empty() and _time.time() < deadline:
-            _time.sleep(0.1)
+        while _time.time() < deadline:
+            is_gen = getattr(self, "_is_generating", None)
+            still_gen = is_gen.is_set() if is_gen is not None else False
+            if not (self._text_queue.unfinished_tasks or not self._text_queue.empty() or still_gen):
+                break
+            _time.sleep(0.05)
         while not self._audio_queue.empty() and _time.time() < deadline:
-            _time.sleep(0.1)
+            if not self._is_stream_alive():
+                self._ensure_stream(start=True)
+            _time.sleep(0.05)
         while _time.time() < deadline:
             with self._buffer_lock:
-                if self._audio_buffer.size == 0:
+                if self._audio_buffer.size == 0 and not self.is_speaking.is_set():
                     break
             cb_idle = _time.time() - self._last_callback_time
             if cb_idle > 3.0:
                 logger.warning("Audio callback stopped (%.1fs idle) — force-clearing", cb_idle)
                 break
             _time.sleep(0.05)
-        leftover = (self._audio_buffer.size > 0 or not self._audio_queue.empty())
+        leftover = (self._audio_buffer.size > 0 or not self._audio_queue.empty() or self.is_speaking.is_set())
         if leftover:
             if _time.time() - self._last_callback_time > 3.0:
                 logger.warning("wait_until_done force-clearing dead stream")
@@ -220,6 +300,7 @@ class BaseTTSEngine:
                     try: self._audio_queue.get_nowait(); self._audio_queue.task_done()
                     except: break
                 self.is_speaking.clear()
+                self._is_generating.clear()
             else:
                 logger.info("Playback still active — waiting more")
                 self.wait_until_done(timeout=60.0)
@@ -440,4 +521,3 @@ def create_engine(provider: str = None, voice: str = None) -> BaseTTSEngine:
         return KokoroTTSEngine(voice=voice)
     else:
         raise ValueError(f"Unknown TTS provider: {provider!r}. Use 'edge', 'supertonic', or 'kokoro'.")
-

@@ -20,12 +20,14 @@ _thread_local = threading.local()
 
 def _reset_com():
     """Reset COM state so next call reinitialises."""
+    if hasattr(_thread_local, "interface"):
+        del _thread_local.interface
     if hasattr(_thread_local, "com_initialized"):
         del _thread_local.com_initialized
 
 
 def _get_interface():
-    """Get Windows audio endpoint interface (thread-safe). Exact v1 logic."""
+    """Get Windows audio endpoint interface (thread-safe)."""
     if not PYCAW_AVAILABLE:
         return None
     try:
@@ -33,9 +35,14 @@ def _get_interface():
             CoInitialize()
             _thread_local.com_initialized = True
 
+        if hasattr(_thread_local, "interface") and _thread_local.interface is not None:
+            return _thread_local.interface
+
         devices = AudioUtilities.GetSpeakers()
-        interface = devices.EndpointVolume  # ← the line that actually works
-        return cast(interface, POINTER(IAudioEndpointVolume))
+        interface = devices.EndpointVolume
+        vol = cast(interface, POINTER(IAudioEndpointVolume))
+        _thread_local.interface = vol
+        return vol
     except Exception as e:
         logger.error("Failed to get audio interface: %s", e)
         _reset_com()

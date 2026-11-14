@@ -71,11 +71,13 @@ def init() -> bool:
         return False
 
 
+init_chroma = init
+
+
 def _is_ready() -> bool:
     if _collection is None:
-        logger.warning("Memory not initialized. Call memory.init() at startup.")
-        return False
-    return True
+        init()
+    return _collection is not None
 
 
 # ── Write ─────────────────────────────────────────────────────────────────────
@@ -252,9 +254,8 @@ def update_entry(id: str, new_text: str) -> bool:
 
 def _vault_ready() -> bool:
     if _vault_collection is None:
-        logger.warning("Vault collection not initialized.")
-        return False
-    return True
+        init()
+    return _vault_collection is not None
 
 
 def index_vault_document(text: str, metadata: dict) -> bool:

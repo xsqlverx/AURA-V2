@@ -11,6 +11,7 @@ TOOLS = [
     {"type": "function", "function": {"name": "prev_track", "description": "Go to previous track.", "parameters": {"type": "object", "properties": {}, "required": []}}},
     # ── Apps ───────────────────────────────────────────────────────────────────
     {"type": "function", "function": {"name": "launch_app", "description": "Launch an application by name.", "parameters": {"type": "object", "properties": {"app_name": {"type": "string"}}, "required": ["app_name"]}}},
+    {"type": "function", "function": {"name": "close_app", "description": "Close or terminate an application or browser tab by name (e.g. 'youtube', 'notepad', 'chrome').", "parameters": {"type": "object", "properties": {"app_name": {"type": "string"}}, "required": ["app_name"]}}},
     {"type": "function", "function": {"name": "list_running_processes", "description": "List currently running processes.", "parameters": {"type": "object", "properties": {"filter_pattern": {"type": "string", "description": "Optional name filter."}}, "required": []}}},
     # ── Files ──────────────────────────────────────────────────────────────────
     {"type": "function", "function": {"name": "open_path", "description": "Open a file, folder, or shortcut (downloads, desktop, documents, etc).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}},
@@ -58,3 +59,38 @@ TOOLS = [
 ]
 
 TOOL_NAMES = {t["function"]["name"] for t in TOOLS}
+TOOL_MAP = {t["function"]["name"]: t for t in TOOLS}
+
+TOOL_ALIASES = {
+    "lock_screen": "lock_pc",
+    "lock": "lock_pc",
+    "search_web": "web_search",
+    "google": "web_search",
+    "search": "web_search",
+    "open_app": "launch_app",
+    "run_app": "launch_app",
+    "start_app": "launch_app",
+    "list_processes": "list_running_processes",
+    "get_processes": "list_running_processes",
+    "processes": "list_running_processes",
+    "open_url": "open_website",
+    "browse": "open_website",
+    "save_memory": "memory",
+    "remember": "memory",
+    "add_memory": "memory",
+    "add_task": "create_task",
+    "set_task": "create_task",
+    "remove_task": "delete_task",
+    "pause": "play_pause",
+    "play": "play_pause",
+    "stop": "play_pause",
+    "stats": "get_system_stats",
+    "system_stats": "get_system_stats",
+    "paste": "clipboard_paste",
+    "copy": "clipboard_copy",
+    "close": "close_app",
+    "close_tab": "close_app",
+    "kill_app": "close_app",
+    "exit_app": "close_app",
+}
+
